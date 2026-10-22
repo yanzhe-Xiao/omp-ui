@@ -59,37 +59,41 @@ const kindIcon = computed(() => {
 
 <style scoped>
 .tool-call-card {
-  padding: 0.75rem;
-  border-radius: 6px;
+  padding: 0.85rem 1.15rem;
+  border-radius: 16px;
   margin: 0.5rem 0;
-  border-left: 3px solid var(--border-color, #ccc);
-  background: var(--bg-tool, #f9f9f9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 0 4px 16px rgba(3, 7, 18, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transition: var(--transition-spring);
 }
 
 .status-pending {
-  border-left-color: #ffc107;
-  background: #fffbf0;
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.08);
 }
 
 .status-running {
-  border-left-color: #17a2b8;
-  background: #f0f9ff;
+  border-color: rgba(96, 165, 250, 0.35);
+  background: rgba(96, 165, 250, 0.08);
 }
 
 .status-completed {
-  border-left-color: #28a745;
-  background: #f0fff4;
+  border-color: rgba(52, 211, 153, 0.35);
+  background: rgba(52, 211, 153, 0.08);
 }
 
 .status-failed {
-  border-left-color: #dc3545;
-  background: #fff5f5;
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.08);
 }
 
 .tool-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
 
 .kind-icon {
@@ -99,22 +103,23 @@ const kindIcon = computed(() => {
 .tool-title {
   flex: 1;
   font-weight: 500;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  color: #FFFFFF;
 }
 
 .status-icon {
-  font-size: 0.875rem;
+  font-size: 0.85rem;
 }
 
 .tool-locations {
   margin-top: 0.5rem;
-  padding-left: 1.5rem;
+  padding-left: 1.65rem;
 }
 
 .location {
-  font-family: monospace;
-  font-size: 0.8rem;
-  color: var(--text-muted, #666);
-  padding: 0.125rem 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.60);
+  padding: 0.15rem 0;
 }
 </style>

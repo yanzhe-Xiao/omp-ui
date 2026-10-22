@@ -1,0 +1,396 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@import url('https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css');
+
+/**
+ * Nocturne Glassmorphism Design System (夜航玻璃拟态)
+ * Font Architecture:
+ * - English non-code: Times New Roman
+ * - Chinese text: LXGW WenKai (霞鹜文楷)
+ * - Code / monospace: JetBrains Mono
+ */
+
+:root {
+  /* Typography Stacks: Times New Roman -> LXGW WenKai (for Chinese) */
+  --font-text: "Times New Roman", Times, "LXGW WenKai", "LXGW WenKai Screen", "霞鹜文楷", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Scene Palette (Background carries all color; glass stays colorless) */
+  --scene-base: #060A13;
+  --scene-ink: #0B1322;
+  --accent-champagne: #E4B863;
+  --accent-champagne-light: #F3DCA8;
+  --accent-champagne-bg: rgba(228, 184, 99, 0.15);
+  --accent-champagne-border: rgba(228, 184, 99, 0.40);
+  --accent-champagne-hover-bg: rgba(228, 184, 99, 0.22);
+  --accent-champagne-hover-border: rgba(228, 184, 99, 0.55);
+  --accent-champagne-shadow: 0 4px 20px rgba(228, 184, 99, 0.18), inset 0 1px 0 rgba(243, 220, 168, 0.35);
+
+  /* Colorless Glass Surfaces (5% - 12% white opacity strictly) */
+  --glass-bg-subtle: rgba(255, 255, 255, 0.05);
+  --glass-bg: rgba(255, 255, 255, 0.08);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.11);
+  --glass-bg-hover: rgba(255, 255, 255, 0.14);
+  --glass-bg-active: rgba(255, 255, 255, 0.16);
+
+  /* Glass Borders */
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --glass-border-hover: rgba(255, 255, 255, 0.30);
+  --glass-border-focus: rgba(255, 255, 255, 0.35);
+
+  /* Directional Lighting Shadows (Top highlight + Bottom dark rim + Deep outer drop) */
+  --glass-shadow-sm: 0 4px 16px rgba(3, 7, 18, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(2, 6, 16, 0.30);
+  --glass-shadow-md: 0 8px 24px rgba(3, 7, 18, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(2, 6, 16, 0.30);
+  --glass-shadow-lg: 0 16px 40px rgba(3, 7, 18, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(2, 6, 16, 0.35);
+  --glass-shadow-hover: 0 24px 64px rgba(3, 7, 18, 0.60), inset 0 1px 0 rgba(255, 255, 255, 0.32), inset 0 -1px 0 rgba(2, 6, 16, 0.35);
+
+  /* High Blur & Saturation */
+  --glass-blur-panel: 60px;
+  --glass-blur-element: 40px;
+  --glass-saturate: 180%;
+
+  /* Fluid Motion Spring Easing */
+  --transition-spring: all 500ms cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-easing: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Typography */
+  --text-primary: #FFFFFF;
+  --text-secondary: rgba(255, 255, 255, 0.80);
+  --text-muted: rgba(255, 255, 255, 0.50);
+  --text-subtle: rgba(255, 255, 255, 0.35);
+  --text-accent: #E4B863;
+  --text-code: #F1F5F9;
+
+  /* Restrained Functional Status Tokens */
+  --status-success: #34D399;
+  --status-warning: #FBBF24;
+  --status-danger: #F87171;
+  --status-info: #60A5FA;
+
+  /* Backward Compatibility Mappings for Existing Components */
+  --bg-primary: #E4B863;
+  --bg-primary-hover: #F3DCA8;
+  --bg-sidebar: rgba(255, 255, 255, 0.06);
+  --bg-main: transparent;
+  --bg-hover: rgba(255, 255, 255, 0.12);
+  --bg-user: rgba(255, 255, 255, 0.11);
+  --bg-assistant: rgba(255, 255, 255, 0.08);
+  --bg-code: rgba(6, 10, 19, 0.75);
+  --bg-tool: rgba(255, 255, 255, 0.06);
+  --bg-dialog: rgba(255, 255, 255, 0.09);
+  --bg-header: rgba(255, 255, 255, 0.08);
+  --bg-input: rgba(255, 255, 255, 0.06);
+  --bg-success: #34D399;
+  --bg-danger: #F87171;
+  --bg-warning: #FBBF24;
+  --border-color: rgba(255, 255, 255, 0.15);
+
+  --glass-card-bg: rgba(255, 255, 255, 0.08);
+  --glass-navbar-bg: rgba(255, 255, 255, 0.07);
+  --glass-bg-menu: rgba(11, 19, 34, 0.88);
+  --glass-shadow: var(--glass-shadow-lg);
+  --glass-input-bg: rgba(255, 255, 255, 0.06);
+  --glass-input-border: rgba(255, 255, 255, 0.15);
+  --glass-input-bg-focus: rgba(255, 255, 255, 0.10);
+
+  /* Deep ink night background with calibrated soft radial light wells */
+  --app-gradient-bg: 
+    radial-gradient(560px circle at 85% 10%, rgba(124, 156, 196, 0.20) 0%, transparent 65%),
+    radial-gradient(520px circle at 10% 90%, rgba(51, 81, 122, 0.16) 0%, transparent 65%),
+    radial-gradient(480px circle at 50% 45%, rgba(228, 184, 99, 0.08) 0%, transparent 60%),
+    #060A13;
+  font-family: var(--font-text);
+  color: var(--text-primary);
+  background-color: #060A13;
+  color-scheme: dark;
+}
+
+/* Dark mode compatibility maintains the Nocturne system */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #E4B863;
+    --bg-primary-hover: #F3DCA8;
+    --text-primary: #FFFFFF;
+    --text-secondary: rgba(255, 255, 255, 0.80);
+    --text-muted: rgba(255, 255, 255, 0.50);
+    --text-accent: #E4B863;
+    --border-color: rgba(255, 255, 255, 0.15);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #app {
+  height: 100%;
+  width: 100%;
+  background-color: #060A13;
+  color: #FFFFFF;
+  font-family: var(--font-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, textarea, select {
+  font-family: inherit;
+}
+
+code, pre, .font-mono, kbd, samp {
+  font-family: var(--font-mono) !important;
+}
+/* Fullscreen Film Grain Noise Overlay (GPU composited layer, zero layout cost) */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.025;
+  transform: translateZ(0);
+  will-change: transform;
+  contain: strict;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+/* ==========================================================================
+   Nocturne Glassmorphism Utility Classes
+   ========================================================================== */
+
+/* 3-Layer Glass Panel (Surface + Inner Luminance + Directional Lighting) */
+.glass-panel {
+  position: relative;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  box-shadow: var(--glass-shadow-lg);
+  overflow: hidden;
+  transition: var(--transition-spring);
+}
+
+.glass-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.12), transparent 48px);
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+/* Glass Card */
+.glass-card {
+  position: relative;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-panel)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  box-shadow: var(--glass-shadow-lg);
+  transition: var(--transition-spring);
+}
+
+.glass-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.12), transparent 40px);
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+.glass-card.interactive:hover {
+  transform: translateY(-2px);
+  border-color: var(--glass-border-hover);
+  box-shadow: var(--glass-shadow-hover);
+}
+
+/* Standard Colorless Glass Button */
+.glass-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(var(--glass-blur-element)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-element)) saturate(var(--glass-saturate));
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  border-radius: 16px;
+  color: #FFFFFF;
+  font-weight: 500;
+  box-shadow: var(--glass-shadow-sm);
+  cursor: pointer;
+  transition: var(--transition-spring);
+}
+
+.glass-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--glass-border-hover);
+  box-shadow: 0 10px 32px rgba(3, 7, 18, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
+}
+
+.glass-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.glass-btn:disabled {
+  opacity: 0.40;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Primary Champagne Gold CTA Button (The ONLY Champagne Element) */
+.champagne-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--accent-champagne-bg);
+  backdrop-filter: blur(var(--glass-blur-element)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-element)) saturate(var(--glass-saturate));
+  border: 1px solid var(--accent-champagne-border);
+  border-radius: 16px;
+  color: var(--accent-champagne-light);
+  font-weight: 600;
+  box-shadow: var(--accent-champagne-shadow);
+  cursor: pointer;
+  transition: var(--transition-spring);
+}
+
+.champagne-btn:hover:not(:disabled) {
+  background: var(--accent-champagne-hover-bg);
+  border-color: var(--accent-champagne-hover-border);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(228, 184, 99, 0.26), inset 0 1px 0 rgba(243, 220, 168, 0.45);
+}
+
+.champagne-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.champagne-btn:disabled {
+  opacity: 0.40;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Specular Sweep Highlighting (Light reflection sweep across glass) */
+.specular-sweep {
+  position: relative;
+  overflow: hidden;
+}
+
+.specular-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-150%) skewX(-20deg);
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.22), transparent);
+  pointer-events: none;
+  transition: transform 700ms ease-out;
+}
+
+.specular-sweep:hover::after {
+  transform: translateX(150%) skewX(-20deg);
+}
+
+/* Glass Inputs, Textareas and Selects */
+.glass-input,
+input[type="text"],
+input[type="password"],
+textarea,
+.glass-select {
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(var(--glass-blur-element)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-element)) saturate(var(--glass-saturate));
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  color: #FFFFFF;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), inset 0 -1px 0 rgba(2, 6, 16, 0.30);
+  transition: var(--transition-spring);
+}
+
+.glass-input::placeholder,
+input::placeholder,
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.glass-input:focus,
+input[type="text"]:focus,
+input[type="password"]:focus,
+textarea:focus,
+.glass-select:focus,
+button:focus-visible,
+a:focus-visible {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 0 0 3px rgba(228, 184, 99, 0.18), 0 8px 24px rgba(3, 7, 18, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* Custom Nocturne Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(228, 184, 99, 0.50);
+}
+
+/* KaTeX Mathematical Formulas (Nocturne Glassmorphism) */
+.katex-display-wrapper {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.85rem 1.15rem;
+  margin: 0.85rem 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-overflow-scrolling: touch;
+}
+
+.katex-display-wrapper .katex-display {
+  margin: 0;
+  text-align: center;
+}
+
+.katex {
+  font-size: 1.05em;
+  color: #FFFFFF;
+}
+
+.katex-html {
+  white-space: normal;
+}
+
+/* Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import type { SlashCommand } from '../lib/types';
 
 const props = defineProps<{
@@ -14,6 +14,22 @@ const emit = defineEmits<{
 }>();
 
 const selectedIndex = ref(0);
+
+const listRef = ref<HTMLElement | null>(null);
+
+function scrollToSelected() {
+  nextTick(() => {
+    if (!listRef.value) return;
+    const selectedEl = listRef.value.querySelector('.command-item.selected') as HTMLElement | null;
+    if (selectedEl) {
+      selectedEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  });
+}
+
+watch(selectedIndex, () => {
+  scrollToSelected();
+});
 
 // Filter commands based on input
 const filteredCommands = computed(() => {
@@ -75,7 +91,7 @@ function selectCommand(cmd: SlashCommand) {
     ref="paletteRef"
     class="command-palette"
   >
-    <div class="command-list">
+    <div ref="listRef" class="command-list">
       <div 
         v-for="(cmd, index) in filteredCommands"
         :key="cmd.name"
@@ -100,20 +116,22 @@ function selectCommand(cmd: SlashCommand) {
 </template>
 
 <style scoped>
-/* Light theme VS Code style */
+/* Nocturne Glassmorphism Command Palette */
 .command-palette {
   position: absolute;
-  bottom: 100%;
+  bottom: calc(100% + 12px);
   left: 0;
-  width: 400px;
-  margin-bottom: 6px;
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.10);
-  max-height: 320px;
+  width: 440px;
+  background: rgba(11, 19, 34, 0.95);
+  backdrop-filter: blur(60px) saturate(180%);
+  -webkit-backdrop-filter: blur(60px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgba(3, 7, 18, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -1px 0 rgba(2, 6, 16, 0.35);
+  max-height: 340px;
   overflow: visible;
-  z-index: 100;
+  z-index: 1000;
+  padding: 0.5rem;
 }
 
 .command-list {
@@ -122,80 +140,93 @@ function selectCommand(cmd: SlashCommand) {
 }
 
 .command-item {
-  padding: 8px 16px;
+  padding: 0.55rem 0.85rem;
   cursor: pointer;
-  border-bottom: 1px solid #f0f0f0;
-  background: #fff;
+  background: transparent;
   display: flex;
   align-items: center;
-  transition: background 0.12s;
+  transition: var(--transition-spring);
   position: relative;
+  border-radius: 14px;
+  margin-bottom: 0.25rem;
 }
+
 .command-item:last-child {
-  border-bottom: none;
+  margin-bottom: 0;
 }
+
+.command-item:hover:not(.selected) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .command-item.selected {
-  background: #2563eb;
-  color: #fff;
-  border-radius: 6px;
-}
-.command-item.selected .command-name,
-.command-item.selected .command-hint,
-.command-item.selected .command-description,
-.command-item.selected .command-source {
-  color: #fff;
+  background: rgba(228, 184, 99, 0.14);
+  border: 1px solid rgba(228, 184, 99, 0.35);
 }
 
 .command-tooltip {
   position: absolute;
-  left: calc(100% + 8px);
+  left: calc(100% + 10px);
   top: 0;
-  width: 220px;
-  background: #fff;
-  color: #333;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-  padding: 8px 12px;
-  font-size: 0.95em;
+  width: 240px;
+  background: rgba(11, 19, 34, 0.92);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(3, 7, 18, 0.60), inset 0 1px 0 rgba(255, 255, 255, 0.20);
+  padding: 0.75rem 1rem;
+  font-size: 0.825rem;
   white-space: normal;
   z-index: 200;
   word-break: break-word;
 }
-.command-item:hover:not(.selected) {
-  background: #f3f8fd;
-}
 
-/* Command row: command and description on same line */
 .command-row {
   display: flex;
   align-items: center;
   width: 100%;
   gap: 0;
 }
+
 .command-name {
-  font-weight: 600;
-  color: #2563eb;
-  font-family: monospace;
-  font-size: 1em;
-  min-width: 110px;
+  font-weight: 700;
+  color: #F3DCA8;
+  background: rgba(228, 184, 99, 0.15);
+  border: 1px solid rgba(228, 184, 99, 0.35);
+  border-radius: 10px;
+  padding: 0.2rem 0.55rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.825rem;
+  min-width: 100px;
   max-width: 140px;
   flex-shrink: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  box-shadow: 0 0 10px rgba(228, 184, 99, 0.15);
 }
+
 .command-description {
-  color: #666;
-  font-size: 0.97em;
-  margin-left: 18px;
+  color: rgba(255, 255, 255, 0.70);
+  font-size: 0.85rem;
+  margin-left: 1rem;
   flex: 1 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.command-item.selected .command-name,
+
+.command-item.selected .command-name {
+  background: rgba(228, 184, 99, 0.25);
+  color: #FFFFFF;
+  border-color: rgba(228, 184, 99, 0.55);
+  box-shadow: 0 0 14px rgba(228, 184, 99, 0.35);
+}
+
 .command-item.selected .command-description {
-  color: #fff;
+  color: #FFFFFF;
+  font-weight: 500;
 }
 </style>

@@ -1,4 +1,4 @@
-// Types for ACP UI application
+// Types for OMP UI application
 
 /**
  * Transport kinds supported by the frontend.
@@ -26,7 +26,14 @@ export interface AgentConfig {
   headers?: Record<string, string>;
 }
 
+export interface ProxyConfig {
+  enabled: boolean;
+  url?: string;
+}
+
 export interface AgentsConfig {
+  version?: number;
+  proxy?: ProxyConfig;
   agents: Record<string, AgentConfig>;
 }
 
@@ -86,6 +93,7 @@ export interface ChatMessage {
   thought?: string;
   timestamp: number;
   toolCalls?: ToolCallInfo[];
+  images?: Array<{ data: string; mimeType: string; previewUrl?: string }>;
 }
 
 export interface ToolCallInfo {
@@ -94,6 +102,9 @@ export interface ToolCallInfo {
   kind: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   locations?: { path: string }[];
+  overview?: string;
+  arguments?: any;
+  result?: string | null;
 }
 
 export interface PermissionRequest {
@@ -132,4 +143,71 @@ export interface ModelInfo {
   modelId: string;
   name: string;
   description?: string;
+}
+
+// Config Options (ACP standard for session configuration such as models, thinking levels)
+export interface ConfigOptionValue {
+  value: string;
+  name?: string;
+  description?: string;
+}
+
+export interface ConfigOption {
+  id: string;
+  name?: string;
+  category?: string;
+  type?: string;
+  currentValue?: string;
+  options?: ConfigOptionValue[];
+}
+
+// Global Session Manager Types
+export interface GlobalSessionSummary {
+  session_id: string;
+  title: string;
+  updated_at: number;
+  cwd: string | null;
+  recap: string | null;
+  bound_account: string | null;
+  bound_provider: string | null;
+  has_entity_file: boolean;
+  file_path: string | null;
+}
+
+export interface TranscriptStats {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+  user_message_count: number;
+  assistant_message_count: number;
+  tool_call_count: number;
+}
+
+export interface TranscriptToolCall {
+  id: string;
+  name: string;
+  arguments: any;
+  result: string | null;
+  is_error: boolean;
+}
+
+export interface TranscriptMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  timestamp?: string;
+  text?: string;
+  thinking?: string;
+  tool_calls: TranscriptToolCall[];
+}
+
+export interface SessionTranscript {
+  session_id: string;
+  title?: string;
+  cwd?: string;
+  model?: string;
+  bound_account?: string;
+  bound_provider?: string;
+  stats: TranscriptStats;
+  messages: TranscriptMessage[];
 }

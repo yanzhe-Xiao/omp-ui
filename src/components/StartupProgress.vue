@@ -101,11 +101,14 @@ const isLongWait = computed(() => props.elapsedSeconds > 10);
 
 <style scoped>
 .startup-progress {
-  padding: 1rem;
-  background: var(--bg-main);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  margin-top: 0.75rem;
+  padding: 1.15rem;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  margin-top: 0.85rem;
+  box-shadow: 0 8px 24px rgba(3, 7, 18, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 -1px 0 rgba(2, 6, 16, 0.30);
 }
 
 .progress-header {
@@ -117,42 +120,45 @@ const isLongWait = computed(() => props.elapsedSeconds > 10);
 
 .agent-name {
   font-weight: 600;
-  color: var(--text-primary);
+  color: #FFFFFF;
+  font-size: 0.9rem;
 }
 
 .elapsed-time {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  font-family: monospace;
+  font-size: 0.75rem;
+  color: #E4B863;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .progress-status {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  background: var(--bg-hover);
-  border-radius: 4px;
+  gap: 0.65rem;
+  padding: 0.6rem 0.85rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
   margin-bottom: 0.75rem;
 }
 
 .phase-icon {
-  font-size: 1.2rem;
+  font-size: 1.15rem;
 }
 
 .phase-text {
-  color: var(--text-secondary);
-  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.85rem;
 }
 
 .first-run-hint {
-  font-size: 0.8rem;
-  color: var(--text-muted);
+  font-size: 0.75rem;
+  color: #F3DCA8;
   font-style: italic;
   margin-bottom: 0.75rem;
-  padding: 0.5rem;
-  background: var(--bg-warning);
-  border-radius: 4px;
+  padding: 0.6rem 0.85rem;
+  background: rgba(228, 184, 99, 0.10);
+  border: 1px solid rgba(228, 184, 99, 0.28);
+  border-radius: 14px;
 }
 
 .progress-actions {
@@ -162,69 +168,72 @@ const isLongWait = computed(() => props.elapsedSeconds > 10);
 }
 
 .details-btn {
-  padding: 0.375rem 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
+  padding: 0.45rem 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.80);
   font-size: 0.8rem;
   cursor: pointer;
+  transition: var(--transition-spring);
 }
 
 .details-btn:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFFFFF;
 }
 
 .cancel-btn {
-  padding: 0.375rem 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
+  padding: 0.45rem 0.85rem;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 12px;
+  background: rgba(248, 113, 113, 0.12);
+  color: #FCA5A5;
   font-size: 0.8rem;
   cursor: pointer;
+  transition: var(--transition-spring);
 }
 
 .cancel-btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--bg-danger);
-  color: var(--bg-danger);
+  background: rgba(248, 113, 113, 0.22);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #FFFFFF;
 }
 
 .logs-container {
   margin-top: 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
   overflow: hidden;
+  background: rgba(6, 10, 19, 0.75);
 }
 
 .logs-header {
-  padding: 0.375rem 0.5rem;
-  background: var(--bg-hover);
+  padding: 0.45rem 0.75rem;
+  background: rgba(255, 255, 255, 0.06);
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-color);
+  color: rgba(255, 255, 255, 0.80);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .logs-content {
   max-height: 150px;
   overflow-y: auto;
-  padding: 0.5rem;
-  background: var(--bg-code);
-  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-  font-size: 0.7rem;
+  padding: 0.65rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
 }
 
 .log-line {
-  color: var(--text-code);
+  color: #E2E8F0;
   white-space: pre-wrap;
   word-break: break-all;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 .no-logs {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.40);
   font-style: italic;
 }
 </style>

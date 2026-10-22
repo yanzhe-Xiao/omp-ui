@@ -24,7 +24,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(all(desktop, not(target_os = "windows")))]
 use shell_escape;
 
-use crate::config::{AgentConfig, AgentTransport};
+use crate::config::{AgentConfig, AgentTransport, ProxyConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInstance {
@@ -76,6 +76,7 @@ impl AgentManager {
         &self,
         name: String,
         config: &AgentConfig,
+        proxy: Option<&ProxyConfig>,
         app_handle: AppHandle,
     ) -> Result<AgentInstance, String> {
         // Reject non-stdio agents on the spawn path. Remote agents are
@@ -94,6 +95,23 @@ impl AgentManager {
             .ok_or_else(|| format!("stdio agent '{}' is missing 'command'", name))?;
         let args: &[String] = config.args.as_deref().unwrap_or(&[]);
 
+        let mut env = config.env.clone();
+        if let Some(proxy_cfg) = proxy {
+            if proxy_cfg.enabled {
+                if let Some(raw_url) = &proxy_cfg.url {
+                    let u = raw_url.trim();
+                    if !u.is_empty() {
+                        env.entry("HTTP_PROXY".to_string()).or_insert_with(|| u.to_string());
+                        env.entry("HTTPS_PROXY".to_string()).or_insert_with(|| u.to_string());
+                        env.entry("ALL_PROXY".to_string()).or_insert_with(|| u.to_string());
+                        env.entry("http_proxy".to_string()).or_insert_with(|| u.to_string());
+                        env.entry("https_proxy".to_string()).or_insert_with(|| u.to_string());
+                        env.entry("all_proxy".to_string()).or_insert_with(|| u.to_string());
+                    }
+                }
+            }
+        }
+
         let agent_id = Uuid::new_v4().to_string();
 
         // On Windows, we need to use cmd.exe to properly resolve .cmd/.bat files like npx
@@ -103,7 +121,7 @@ impl AgentManager {
             cmd.arg("/C")
                 .arg(command)
                 .args(args)
-                .envs(&config.env)
+                .envs(&env)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -157,7 +175,7 @@ impl AgentManager {
             }
             cmd.arg("-c")
                 .arg(&shell_command)
-                .envs(&config.env)
+                .envs(&env)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -277,6 +295,7 @@ impl AgentManager {
         &self,
         _name: String,
         _config: &AgentConfig,
+        _proxy: Option<&ProxyConfig>,
         _app_handle: AppHandle,
     ) -> Result<AgentInstance, String> {
         Err("stdio agents are not supported on this platform; configure a websocket or http transport".to_string())

@@ -19,6 +19,8 @@ import type {
   AgentMessage,
   AgentStderr,
   AgentTransportKind,
+  GlobalSessionSummary,
+  SessionTranscript,
 } from '../types';
 import { getTransportKind } from '../types';
 import { isTauriHost, isDesktop } from '../platform';
@@ -38,12 +40,13 @@ export interface RemoteAgentOptions {
 // mutate it (the Tauri implementation watches a real file).
 // ---------------------------------------------------------------------------
 
-const WEB_CONFIG_KEY = 'acp-ui:agents';
+const WEB_CONFIG_KEY = 'omp-ui:agents';
+const LEGACY_WEB_CONFIG_KEY = 'acp-ui:agents';
 const WEB_CONFIG_PATH_LABEL = '(browser local storage)';
 
 function loadWebConfig(): AgentsConfig {
   if (typeof localStorage === 'undefined') return { agents: {} };
-  const raw = localStorage.getItem(WEB_CONFIG_KEY);
+  const raw = localStorage.getItem(WEB_CONFIG_KEY) || localStorage.getItem(LEGACY_WEB_CONFIG_KEY);
   if (!raw) return { agents: {} };
   try {
     const parsed = JSON.parse(raw);
@@ -194,6 +197,17 @@ export async function removeAgent(name: string): Promise<AgentsConfig> {
   return config;
 }
 
+export async function updateProxy(enabled: boolean, url?: string): Promise<AgentsConfig> {
+  if (isTauriHost()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<AgentsConfig>('update_proxy', { enabled, url: url || null });
+  }
+  const config = loadWebConfig();
+  config.proxy = { enabled, url };
+  saveWebConfig(config);
+  return config;
+}
+
 // ---------------------------------------------------------------------------
 // Stdio agent lifecycle (Tauri desktop only — throws elsewhere)
 // ---------------------------------------------------------------------------
@@ -326,11 +340,136 @@ export async function writeTextFile(path: string, content: string): Promise<void
 }
 
 // ---------------------------------------------------------------------------
+// Global Sessions & Transcripts (Tauri desktop only)
+// ---------------------------------------------------------------------------
+
+export async function getGlobalSessions(): Promise<GlobalSessionSummary[]> {
+  if (isTauriHost()) {
+    // Runtime host check: @tauri-apps/api is desktop-only and omitted in web browser build
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<GlobalSessionSummary[]>('get_global_sessions');
+  }
+
+  // Web dev fallback
+  try {
+    const res = await fetch('/api/global-sessions');
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Failed to fetch /api/global-sessions in web mode:', err);
+  }
+  return [];
+}
+
+export async function getSessionTranscript(
+  sessionId: string,
+  cwd?: string | null,
+  filePath?: string | null
+): Promise<SessionTranscript> {
+  if (isTauriHost()) {
+    // Runtime host check: @tauri-apps/api is desktop-only and omitted in web browser build
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<SessionTranscript>('get_session_transcript', {
+      sessionId,
+      cwd: cwd ?? null,
+      filePath: filePath ?? null,
+    });
+  }
+
+  // Web dev fallback
+  const params = new URLSearchParams({ sessionId });
+  if (cwd) params.set('cwd', cwd);
+  if (filePath) params.set('filePath', filePath);
+  const res = await fetch(`/api/session-transcript?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Failed to load transcript: ${res.statusText}`);
+  }
+  return await res.json();
+}
+
+export async function deleteSessionFile(
+  sessionId: string,
+  cwd?: string | null,
+  filePath?: string | null
+): Promise<void> {
+  if (isTauriHost()) {
+    // Runtime host check: @tauri-apps/api is desktop-only and omitted in web browser build
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('delete_session_file', {
+      sessionId,
+      cwd: cwd ?? null,
+      filePath: filePath ?? null,
+    });
+    return;
+  }
+
+  // Web dev fallback
+  const params = new URLSearchParams({ sessionId });
+  if (cwd) params.set('cwd', cwd);
+  if (filePath) params.set('filePath', filePath);
+  await fetch(`/api/delete-session?${params.toString()}`);
+}
+
+export async function deleteWorkspaceFolder(cwd: string): Promise<void> {
+  if (isTauriHost()) {
+    // Runtime host check: @tauri-apps/api is desktop-only and omitted in web browser build
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('delete_workspace_folder', { cwd });
+    return;
+  }
+
+  // Web dev fallback
+  const params = new URLSearchParams({ cwd });
+  await fetch(`/api/delete-workspace?${params.toString()}`);
+}
+
+export interface PromptSuggestion {
+  label: string;
+  prompt: string;
+  icon?: string;
+}
+
+export interface OmpModelsAndConfig {
+  default_model_id: string;
+  default_thinking_level: string;
+  default_cwd: string;
+  models: Array<{ modelId: string; name: string; description?: string }>;
+  thinking_levels: Array<{ id: string; name: string; description?: string }>;
+  commands: Array<{ name: string; description: string; hint?: string }>;
+  prompt_suggestions: PromptSuggestion[];
+}
+
+export async function getOmpModelsAndConfig(): Promise<OmpModelsAndConfig> {
+  if (isTauriHost()) {
+    // Runtime host check: @tauri-apps/api is desktop-only and omitted in web browser build
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<OmpModelsAndConfig>('get_omp_models_and_config');
+  }
+
+  // Web dev fallback
+  try {
+    const res = await fetch('/api/omp-models-config');
+    if (res.ok) return await res.json();
+  } catch (err) {
+    console.warn('Failed to fetch /api/omp-models-config in web mode:', err);
+  }
+
+  return {
+    default_model_id: '',
+    default_thinking_level: 'auto',
+    default_cwd: '.',
+    models: [],
+    thinking_levels: [],
+    commands: [],
+    prompt_suggestions: [],
+  };
+}
+// ---------------------------------------------------------------------------
 // Re-exports
 // ---------------------------------------------------------------------------
 
 export { loadKvStore } from './storage';
 export type { KVStore } from './storage';
+export { isDesktop, isTauriHost } from '../platform';
 
 // Re-export `getTransportKind` for convenience so call sites that already
 // pull from `host` don't need a second import.

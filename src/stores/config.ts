@@ -4,7 +4,7 @@ import { ref, computed } from 'vue';
 import type { AgentsConfig, AgentConfig, AgentTransportKind } from '../lib/types';
 import { getTransportKind } from '../lib/types';
 import { restrictedTransports } from '../lib/platform';
-import { getConfig, reloadConfig, getConfigPath, onConfigChanged } from '../lib/host';
+import { getConfig, reloadConfig, getConfigPath, onConfigChanged, updateProxy } from '../lib/host';
 
 export const useConfigStore = defineStore('config', () => {
   const config = ref<AgentsConfig>({ agents: {} });
@@ -18,10 +18,19 @@ export const useConfigStore = defineStore('config', () => {
   const allAgentNames = computed(() => Object.keys(config.value.agents));
 
   const agentNames = computed(() => {
-    if (!restrictedTransports()) return allAgentNames.value;
-    return allAgentNames.value.filter(
-      (name) => getTransportKind(config.value.agents[name]) !== 'stdio'
+    const raw = !restrictedTransports()
+      ? allAgentNames.value
+      : allAgentNames.value.filter(
+          (name) => getTransportKind(config.value.agents[name]) !== 'stdio'
+        );
+    const ompIdx = raw.findIndex(
+      (n) => n.toLowerCase() === 'oh my pi' || n.toLowerCase() === 'omp'
     );
+    if (ompIdx > 0) {
+      const ompName = raw[ompIdx];
+      return [ompName, ...raw.slice(0, ompIdx), ...raw.slice(ompIdx + 1)];
+    }
+    return raw;
   });
 
   const hasAgents = computed(() => agentNames.value.length > 0);
@@ -44,6 +53,21 @@ export const useConfigStore = defineStore('config', () => {
       return k === 'websocket' || k === 'http';
     })
   );
+
+  const proxy = computed(() => config.value.proxy);
+
+  async function saveProxy(enabled: boolean, url?: string) {
+    loading.value = true;
+    error.value = null;
+    try {
+      config.value = await updateProxy(enabled, url);
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e);
+      throw e;
+    } finally {
+      loading.value = false;
+    }
+  }
 
   async function loadConfig() {
     loading.value = true;
@@ -107,6 +131,8 @@ export const useConfigStore = defineStore('config', () => {
     getAgent,
     setupHotReload,
     updateFromEvent,
+    proxy,
+    saveProxy,
     clearError,
   };
 });

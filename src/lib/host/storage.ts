@@ -20,10 +20,10 @@ class WebKVStore implements KVStore {
   private data: Record<string, unknown>;
 
   constructor(name: string) {
-    this.storageKey = `acp-ui:${name}`;
+    this.storageKey = `omp-ui:${name}`;
     this.data = {};
     if (typeof localStorage !== 'undefined') {
-      const raw = localStorage.getItem(this.storageKey);
+      const raw = localStorage.getItem(this.storageKey) || localStorage.getItem(`acp-ui:${name}`);
       if (raw) {
         try {
           this.data = JSON.parse(raw) ?? {};

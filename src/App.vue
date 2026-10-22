@@ -1,33 +1,114 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import { canPickFolder, pickFolder, loadKvStore, type KVStore } from './lib/host';
+import { loadKvStore, isDesktop, type KVStore } from './lib/host';
 import { useConfigStore } from './stores/config';
 import { useSessionStore } from './stores/session';
 import { initTelemetry } from './lib/telemetry';
-import AgentSelector from './components/AgentSelector.vue';
+
 import SessionList from './components/SessionList.vue';
 import ChatView from './components/ChatView.vue';
 import PermissionDialog from './components/PermissionDialog.vue';
 import SettingsView from './components/SettingsView.vue';
 import AuthMethodDialog from './components/AuthMethodDialog.vue';
 import TrafficMonitor from './components/TrafficMonitor.vue';
-import StartupProgress from './components/StartupProgress.vue';
+import ModelPicker from './components/ModelPicker.vue';
+import ThinkingPicker from './components/ThinkingPicker.vue';
+import CommandPalette from './components/CommandPalette.vue';
+import type { SlashCommand } from './lib/types';
+
 import type { SavedSession } from './lib/types';
 
 const configStore = useConfigStore();
 const sessionStore = useSessionStore();
 
-const selectedAgent = ref('');
+const selectedAgent = ref('Oh My Pi');
 const selectedCwd = ref('');
 // On mobile / web there is no native folder picker (and the cwd refers to
 // a path on the *agent's* machine, not the local device), so we expose a
-// free-text field instead of the picker button.
-const folderPickerAvailable = canPickFolder();
 const showSidebar = ref(true);
 const showSettings = ref(false);
 const showTrafficMonitor = ref(false);
-const showStartupDetails = ref(false);
 
+
+const availableModels = computed(() => sessionStore.availableModels);
+const currentModelId = computed(() => sessionStore.currentModelId);
+const availableThinkingLevels = computed(() => sessionStore.availableThinkingLevels);
+const currentThinkingLevel = computed(() => sessionStore.currentThinkingLevel);
+const promptSuggestions = computed(() => sessionStore.promptSuggestions);
+const heroAttachedImages = ref<Array<{ data: string; mimeType: string; previewUrl: string; name?: string }>>([]);
+const heroFileInputRef = ref<HTMLInputElement | null>(null);
+
+async function processHeroImageFile(file: File) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result as string;
+    const rawBase64 = dataUrl.replace(/^data:[^;]+;base64,/, '');
+    heroAttachedImages.value.push({
+      data: rawBase64,
+      mimeType: file.type || 'image/png',
+      name: file.name,
+      previewUrl: dataUrl,
+    });
+  };
+  reader.readAsDataURL(file);
+}
+
+async function handleHeroPaste(event: ClipboardEvent) {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  for (const item of Array.from(items)) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (file) {
+        await processHeroImageFile(file);
+      }
+    }
+  }
+}
+
+async function handleHeroDrop(event: DragEvent) {
+  event.preventDefault();
+  const files = event.dataTransfer?.files;
+  if (!files) return;
+  for (const file of Array.from(files)) {
+    if (file.type.startsWith('image/')) {
+      await processHeroImageFile(file);
+    }
+  }
+}
+
+function handleHeroFileChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (input.files) {
+    for (const file of Array.from(input.files)) {
+      if (file.type.startsWith('image/')) {
+        processHeroImageFile(file);
+      }
+    }
+  }
+  input.value = '';
+}
+const heroInputText = ref('');
+const availableCommands = computed(() => sessionStore.availableCommands);
+const heroCommandPaletteRef = ref<InstanceType<typeof CommandPalette> | null>(null);
+
+const showHeroCommandPalette = computed(() => {
+  if (availableCommands.value.length === 0) return false;
+  const text = heroInputText.value;
+  if (!text.startsWith('/')) return false;
+  const spaceIndex = text.indexOf(' ');
+  return spaceIndex === -1;
+});
+
+const heroCommandFilter = computed(() => {
+  if (!heroInputText.value.startsWith('/')) return '';
+  return heroInputText.value.slice(1);
+});
+
+function handleHeroCommandSelect(command: SlashCommand) {
+  heroInputText.value = `/${command.name} `;
+}
 // Reactive flag tracking whether the viewport is narrow enough to show the
 // sidebar as a slide-in drawer (mobile / very narrow desktop windows). Used
 // by the template to decide when the backdrop is interactive and by
@@ -69,7 +150,6 @@ const isLoading = computed(() => sessionStore.isLoading);
 const isConnecting = computed(() => sessionStore.isConnecting);
 const isReconnecting = computed(() => sessionStore.isReconnecting);
 const error = computed(() => sessionStore.error || configStore.error);
-const hasAgents = computed(() => configStore.hasAgents);
 
 // Name of the agent the reconnect banner refers to. Falls back to the
 // generic "agent" if the saved session has no name (shouldn't happen).
@@ -140,54 +220,101 @@ onMounted(async () => {
   }
 });
 
-async function handleAgentSelect(agentName: string) {
-  selectedAgent.value = agentName;
+function isTmpCwd(cwd?: string | null): boolean {
+  if (!cwd) return true;
+  const lower = cwd.toLowerCase();
+  return lower.includes('appdata\\local\\temp') || lower.includes('/tmp') || lower.includes('\\tmp');
 }
 
-async function handleSelectFolder() {
-  const folder = await pickFolder('Select Working Directory');
-  if (folder) {
-    selectedCwd.value = folder;
-    // Persist the selection
-    if (prefsStore) {
-      await prefsStore.set('lastCwd', folder);
-      await prefsStore.save();
+function getFolderName(pathStr: string): string {
+  const parts = pathStr.split(/[\\/]/).filter(Boolean);
+  return parts.pop() || pathStr;
+}
+
+async function handleNewSession(preferredCwd?: string) {
+  if (sessionStore.isConnected && !preferredCwd) {
+    if (sessionStore.currentSession?.cwd && !isTmpCwd(sessionStore.currentSession.cwd)) {
+      selectedCwd.value = sessionStore.currentSession.cwd;
     }
-  }
-}
-
-/** Persist a typed cwd as the user edits it (mobile / web field). */
-async function handleCwdInput(event: Event) {
-  const value = (event.target as HTMLInputElement).value;
-  selectedCwd.value = value;
-  if (prefsStore) {
-    await prefsStore.set('lastCwd', value);
-    await prefsStore.save();
-  }
-}
-
-async function handleNewSession() {
-  if (!selectedAgent.value) return;
-
-  // ACP requires an absolute working directory; passing '.' is rejected by
-  // most agents. On desktop the folder picker always returns an absolute
-  // path, but on mobile the user types it, so validate up-front and surface
-  // a helpful error rather than letting the agent reject `session/new`.
-  const cwd = selectedCwd.value.trim();
-  if (!cwd) {
-    sessionStore.error = 'Please enter a working directory (absolute path on the agent\u2019s machine).';
+    await sessionStore.disconnect();
     return;
   }
-  const isAbsolute = cwd.startsWith('/') || /^[A-Za-z]:[\\/]/.test(cwd);
-  if (!isAbsolute) {
-    sessionStore.error = `Working directory must be an absolute path (got: ${cwd}).`;
-    return;
+
+  const targetCwd = preferredCwd || selectedCwd.value || sessionStore.currentSession?.cwd;
+  if (targetCwd && !isTmpCwd(targetCwd)) {
+    selectedCwd.value = targetCwd;
   }
+
+  const agent = selectedAgent.value || configStore.agentNames[0] || 'Oh My Pi';
+  selectedAgent.value = agent;
+
+  let cwd = selectedCwd.value?.trim() || sessionStore.defaultCwd || '.';
+  selectedCwd.value = cwd;
 
   try {
-    await sessionStore.createSession(selectedAgent.value, cwd);
+    if (sessionStore.isConnected) {
+      await sessionStore.disconnect();
+    }
+    if (isDesktop()) {
+      await sessionStore.createSession(agent, cwd);
+    }
   } catch (e) {
     console.error('Failed to create session:', e);
+  }
+}
+
+async function handleNewProjectChat(projectCwd: string) {
+  selectedCwd.value = projectCwd;
+  const agent = selectedAgent.value || configStore.agentNames[0] || 'Oh My Pi';
+  selectedAgent.value = agent;
+
+  try {
+    if (sessionStore.isConnected) {
+      await sessionStore.disconnect();
+    }
+    if (isDesktop()) {
+      await sessionStore.createSession(agent, projectCwd);
+    }
+  } catch (e) {
+    console.error('Failed to create session in project workspace:', e);
+  }
+}
+
+async function handleSendHeroPrompt(promptText?: string) {
+  const text = (typeof promptText === 'string' ? promptText : heroInputText.value).trim();
+  if ((!text && heroAttachedImages.value.length === 0) || isLoading.value) return;
+
+  const imagesToSend = heroAttachedImages.value.map(img => ({
+    data: img.data,
+    mimeType: img.mimeType,
+  }));
+  heroInputText.value = '';
+  heroAttachedImages.value = [];
+  const agent = selectedAgent.value || configStore.agentNames[0] || 'Oh My Pi';
+  selectedAgent.value = agent;
+
+  let cwd = selectedCwd.value?.trim() || sessionStore.defaultCwd || '.';
+  selectedCwd.value = cwd;
+
+  try {
+    await sessionStore.createSession(agent, cwd);
+    await sessionStore.sendPrompt(text, imagesToSend);
+  } catch (e) {
+    console.error('Failed to create session and send prompt:', e);
+  }
+}
+
+function handleHeroKeyDown(event: KeyboardEvent) {
+  if (showHeroCommandPalette.value && heroCommandPaletteRef.value) {
+    if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(event.key)) {
+      heroCommandPaletteRef.value.handleKeyDown(event);
+      return;
+    }
+  }
+
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    handleSendHeroPrompt();
   }
 }
 
@@ -204,13 +331,6 @@ async function handleDeleteSession(sessionId: string) {
   await sessionStore.deleteSession(sessionId);
 }
 
-async function handleDisconnect() {
-  await sessionStore.disconnect();
-}
-
-async function handleCancelConnection() {
-  await sessionStore.cancelConnection();
-}
 
 function handlePermissionSelect(optionId: string) {
   sessionStore.resolvePermission(optionId);
@@ -263,108 +383,65 @@ function clearError() {
 
 <template>
   <div class="app-container" :class="{ 'narrow-layout': isNarrowLayout }">
-    <!-- Sidebar (slides in as a drawer on narrow viewports) -->
-    <aside
-      v-show="showSidebar"
-      class="sidebar"
-      :class="{ 'is-drawer': isNarrowLayout }"
-    >
+    <!-- Sidebar with slide & collapse transition -->
+    <Transition name="sidebar-dock">
+      <aside
+        v-if="showSidebar"
+        class="sidebar"
+        :class="{ 'is-drawer': isNarrowLayout }"
+      >
       <div class="sidebar-header">
-        <h1>ACP UI</h1>
+        <div class="brand-group">
+          <span class="brand-glow-dot"></span>
+          <h1>OMP UI</h1>
+        </div>
         <div class="header-actions">
           <button 
-            class="settings-btn" 
+            class="settings-btn glass-btn" 
             :class="{ active: showTrafficMonitor }"
             @click="showTrafficMonitor = !showTrafficMonitor" 
-            title="ACP Traffic Monitor"
-          >📡</button>
-          <button class="settings-btn" @click="showSettings = true" title="Settings">⚙</button>
-          <button class="toggle-btn" @click="toggleSidebar">◀</button>
+            title="流量监控"
+          >
+            <!-- Custom Vector Radar Icon -->
+            <svg class="header-action-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+              <path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="currentColor" fill-opacity="0.3" />
+              <path d="M12 3a9 9 0 0 1 9 9" />
+              <path d="M12 7a5 5 0 0 1 5 5" />
+              <path d="M12 17v4" />
+              <path d="M9 21h6" />
+            </svg>
+          </button>
+          <button class="settings-btn glass-btn" @click="showSettings = true" title="设置">
+            <!-- Custom Vector Gear Icon -->
+            <svg class="header-action-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+          <button class="toggle-btn glass-btn" @click="toggleSidebar" title="收起侧边栏">
+            <!-- Custom Vector Panel Collapse Icon -->
+            <svg class="header-action-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15">
+              <rect x="3" y="3" width="18" height="18" rx="4" />
+              <path d="M9 3v18" />
+              <path d="M15 15l-3-3 3-3" />
+            </svg>
+          </button>
         </div>
       </div>
       
       <div class="sidebar-content">
-        <!-- Agent Selection -->
-        <div class="section">
-          <AgentSelector 
-            v-model:selected="selectedAgent"
-            @select="handleAgentSelect"
-          />
-          
-          <!-- Working Directory Picker -->
-          <div class="cwd-picker">
-            <label>Working Directory:</label>
-            <!-- Desktop: read-only display + folder picker. -->
-            <div v-if="folderPickerAvailable" class="cwd-row">
-              <span class="cwd-path" :title="selectedCwd || 'Current directory'">
-                {{ selectedCwd ? selectedCwd.split(/[\\/]/).pop() : '.' }}
-              </span>
-              <button 
-                class="cwd-btn" 
-                @click="handleSelectFolder"
-                title="Select folder"
-                :disabled="isConnecting || isConnected"
-              >
-                📁
-              </button>
-            </div>
-            <!-- Mobile / web: free-text input. The cwd is interpreted by
-                 the remote agent, so the path must exist on the agent's
-                 machine. -->
-            <input
-              v-else
-              class="cwd-input"
-              type="text"
-              :value="selectedCwd"
-              @input="handleCwdInput"
-              :disabled="isConnecting || isConnected"
-              placeholder="/absolute/path/on/agent"
-              autocapitalize="none"
-              autocorrect="off"
-              spellcheck="false"
-            />
-          </div>
-          
-          <button 
-            v-if="hasAgents && !isConnected && !isConnecting"
-            class="new-session-btn"
-            :disabled="!selectedAgent || isLoading"
-            @click="handleNewSession"
-          >
-            {{ isLoading ? 'Connecting...' : 'New Session' }}
-          </button>
-          
-          <!-- Startup Progress -->
-          <StartupProgress 
-            v-if="isConnecting"
-            :agent-name="selectedAgent"
-            :phase="sessionStore.startupPhase"
-            :logs="sessionStore.startupLogs"
-            :elapsed-seconds="sessionStore.startupElapsed"
-            :show-details="showStartupDetails"
-            @cancel="handleCancelConnection"
-            @toggle-details="showStartupDetails = !showStartupDetails"
-          />
-          
-          <button 
-            v-if="isConnected"
-            class="disconnect-btn"
-            @click="handleDisconnect"
-          >
-            Disconnect
-          </button>
-        </div>
-        
-        <!-- Session List -->
-        <div class="section">
+        <!-- Main Tree Section (Takes all available space!) -->
+        <div class="sidebar-main-tree">
           <SessionList 
+            @new-chat="handleNewSession"
+            @new-project-chat="handleNewProjectChat"
             @resume="handleResumeSession"
             @delete="handleDeleteSession"
           />
         </div>
       </div>
     </aside>
-    
+    </Transition>
     <!-- Backdrop behind the drawer on narrow viewports. Only intercepts
          taps when the layout is narrow; on desktop it's display:none. -->
     <div
@@ -383,14 +460,21 @@ function clearError() {
       aria-label="Open menu"
     >☰</button>
 
-    <!-- Collapsed sidebar toggle -->
-    <button 
-      v-if="!showSidebar" 
-      class="sidebar-toggle-collapsed"
-      @click="toggleSidebar"
-    >
-      ▶
-    </button>
+    <!-- Floating expand button when sidebar is collapsed on welcome screen -->
+    <Transition name="fade-fast">
+      <button 
+        v-if="!showSidebar && !isConnected && !isNarrowLayout" 
+        class="sidebar-expand-float-btn glass-btn"
+        @click="showSidebar = true"
+        title="展开侧边栏"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+          <rect x="3" y="3" width="18" height="18" rx="4" />
+          <path d="M9 3v18" />
+          <path d="M13 9l3 3-3 3" />
+        </svg>
+      </button>
+    </Transition>
     
     <!-- Main Content Area -->
     <div class="main-area">
@@ -419,15 +503,123 @@ function clearError() {
         </div>
         
         <!-- Chat View when connected -->
-        <ChatView v-if="isConnected" />
+        <ChatView 
+          v-if="isConnected" 
+          :show-sidebar="showSidebar"
+          @toggle-sidebar="showSidebar = true"
+          @new-session="(cwd) => handleNewSession(cwd)"
+        />
         
         <!-- Welcome screen when not connected -->
-        <div v-else class="welcome-screen">
-          <h2>Welcome to ACP UI</h2>
-          <p>Select an agent and create a new session to get started.</p>
-          <p v-if="!hasAgents" class="hint">
-            Configure agents in your config file to begin.
-          </p>
+        <!-- New Chat / Welcome Hero Screen (Unboxed, serene, matching Codex reference) -->
+        <div v-else class="new-chat-hero-screen">
+          <div class="hero-center-content">
+            <div class="hero-cloud-emblem">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="44" height="44">
+                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+              </svg>
+            </div>
+            <h1 class="hero-heading">我们要构建什么？</h1>
+
+            <!-- Active Workspace Indicator -->
+            <div v-if="selectedCwd && !isTmpCwd(selectedCwd)" class="hero-workspace-pill">
+              <svg class="pill-folder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="13" height="13">
+                <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+              </svg>
+              <span>项目工作区: <strong>{{ getFolderName(selectedCwd) }}</strong></span>
+              <span class="workspace-pill-path" :title="selectedCwd">({{ selectedCwd }})</span>
+            </div>
+            <div v-if="promptSuggestions.length > 0" class="hero-chips-row">
+              <button 
+                v-for="chip in promptSuggestions"
+                :key="chip.prompt"
+                class="prompt-chip" 
+                @click="handleSendHeroPrompt(chip.prompt)"
+              >
+                <span class="chip-sparkle">{{ chip.icon || '✦' }}</span>
+                <span>{{ chip.label }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Bottom Unified Input Card -->
+          <div class="hero-input-tray">
+            <div 
+              class="input-card glass-card" 
+              :class="{ 'is-command-active': heroInputText.startsWith('/') }"
+              @dragover.prevent
+              @drop="handleHeroDrop"
+            >
+              <!-- Attached Images Preview Bar -->
+              <div v-if="heroAttachedImages.length > 0" class="hero-attached-images-tray">
+                <div v-for="(img, idx) in heroAttachedImages" :key="idx" class="hero-attached-img-item">
+                  <img :src="img.previewUrl" class="hero-attached-thumb" />
+                  <button class="remove-img-btn" @click="heroAttachedImages.splice(idx, 1)">✕</button>
+                </div>
+              </div>
+
+              <CommandPalette
+                ref="heroCommandPaletteRef"
+                :commands="availableCommands"
+                :filter="heroCommandFilter"
+                :visible="showHeroCommandPalette"
+                @select="handleHeroCommandSelect"
+                @close="showHeroCommandPalette = false"
+              />
+              <textarea
+                v-model="heroInputText"
+                placeholder="随心输入您的想法或问题... (输入 / 查看快捷指令，支持直接粘贴图片)"
+                @keydown="handleHeroKeyDown"
+                @paste="handleHeroPaste"
+                rows="3"
+              />
+              <div class="input-card-bottom">
+                <div class="input-hints">
+                  <button class="attach-image-btn" @click="heroFileInputRef?.click()" title="添加图片 (支持直接粘贴图片 Ctrl+V)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15">
+                      <rect x="3" y="3" width="18" height="18" rx="4" />
+                      <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                  </button>
+                  <input 
+                    ref="heroFileInputRef" 
+                    type="file" 
+                    accept="image/*" 
+                    multiple 
+                    style="display: none" 
+                    @change="handleHeroFileChange" 
+                  />
+                  <span class="hint-text">按 <kbd>Enter</kbd> 发送，<kbd>Shift</kbd> + <kbd>Enter</kbd> 换行</span>
+                </div>
+                <div class="input-card-actions-right">
+                  <ModelPicker 
+                    :models="availableModels"
+                    :current-model-id="currentModelId"
+                    placement="top"
+                    @change="(m) => sessionStore.setModel(m)"
+                  />
+                  <ThinkingPicker
+                    :levels="availableThinkingLevels"
+                    :current-level="currentThinkingLevel"
+                    placement="top"
+                    @change="(lvl) => sessionStore.setThinkingLevel(lvl)"
+                  />
+                  <button 
+                    class="send-btn champagne-btn"
+                    :disabled="!heroInputText.trim() || isLoading"
+                    @click="handleSendHeroPrompt()"
+                  >
+                    <svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+                      <line x1="22" y1="2" x2="11" y2="13" />
+                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
+                    <span>发送</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </main>
       
@@ -457,6 +649,7 @@ function clearError() {
     <!-- Settings -->
     <SettingsView 
       v-if="showSettings"
+      v-model:selected-agent="selectedAgent"
       @close="showSettings = false"
     />
   </div>
@@ -575,14 +768,147 @@ html, body, #app {
 
 .sidebar-content {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-main-tree {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-footer-group {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.sidebar-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  gap: 0.5rem;
+}
+
+.workspace-status-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: var(--transition-spring);
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace-status-capsule:hover {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(228, 184, 99, 0.35);
+  color: #FFFFFF;
+}
+
+.status-indicator-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94A3B8;
+  flex-shrink: 0;
+}
+
+.status-indicator-dot.connected {
+  background: #34D399;
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.6);
+}
+
+.capsule-agent-text {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.capsule-divider {
+  color: rgba(255, 255, 255, 0.30);
+}
+
+.capsule-cwd-text {
+  color: rgba(255, 255, 255, 0.50);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.capsule-gear-icon {
+  color: rgba(255, 255, 255, 0.35);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.quick-disconnect-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.15);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #F87171;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: var(--transition-spring);
+}
+
+.quick-disconnect-btn:hover {
+  background: rgba(248, 113, 113, 0.25);
+  border-color: rgba(248, 113, 113, 0.60);
+}
+
+.agent-config-expanded {
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(6, 10, 19, 0.95);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.config-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.config-drawer-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.config-close-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  font-size: 0.8rem;
 }
 
 .section {
-  padding: 1rem;
+  padding: 0.5rem;
   border-bottom: 1px solid var(--border-color);
 }
-
 .new-session-btn,
 .disconnect-btn {
   width: 100%;
@@ -682,17 +1008,60 @@ html, body, #app {
   background: #c82333;
 }
 
-.sidebar-toggle-collapsed {
+/* Sidebar slide in/out spring transition */
+.sidebar-dock-enter-active,
+.sidebar-dock-leave-active {
+  transition: transform 500ms cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 500ms cubic-bezier(0.16, 1, 0.3, 1),
+              margin-left 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-dock-enter-from,
+.sidebar-dock-leave-to {
+  transform: translateX(-100%);
+  opacity: 0;
+  margin-left: -320px;
+}
+
+/* Floating expand button when sidebar is collapsed */
+.sidebar-expand-float-btn {
   position: fixed;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 0.5rem;
-  border: 1px solid var(--border-color);
-  border-left: none;
-  border-radius: 0 4px 4px 0;
-  background: var(--bg-sidebar);
+  top: 1.15rem;
+  left: 1.25rem;
+  z-index: 999;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  border-radius: 12px;
+  color: #E4B863;
   cursor: pointer;
+  box-shadow: 0 8px 24px rgba(3, 7, 18, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: var(--transition-spring);
+}
+
+.sidebar-expand-float-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(228, 184, 99, 0.45);
+  transform: translateY(-1px);
+  box-shadow: 0 12px 32px rgba(3, 7, 18, 0.6), 0 0 14px rgba(228, 184, 99, 0.25);
+}
+
+.fade-fast-enter-active,
+.fade-fast-leave-active {
+  transition: opacity 300ms ease, transform 300ms ease;
+}
+
+.fade-fast-enter-from,
+.fade-fast-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
 }
 
 .main-area {
@@ -813,28 +1182,317 @@ html, body, #app {
   }
 }
 
-.welcome-screen {
+/* New Chat Hero Screen (Unboxed, serene, matching Codex reference) */
+.new-chat-hero-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.hero-center-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding: 2rem 1.5rem;
   text-align: center;
-  padding: 2rem;
-  color: var(--text-secondary);
 }
 
-.welcome-screen h2 {
-  margin-bottom: 0.5rem;
-  color: var(--text-primary);
+.hero-cloud-emblem {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(124, 156, 196, 0.22) 0%, transparent 70%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7C9CC4;
+  margin-bottom: 1.5rem;
 }
 
-.welcome-screen .hint {
-  margin-top: 1rem;
-  font-size: 0.875rem;
-  color: var(--text-muted);
+.hero-heading {
+  font-size: 2.15rem;
+  font-weight: 500;
+  color: #FFFFFF;
+  margin: 0 0 1.75rem 0;
+  letter-spacing: -0.02em;
+}
+.hero-workspace-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  margin-top: -0.5rem;
+  margin-bottom: 1.5rem;
+  border-radius: 9999px;
+  background: rgba(124, 156, 196, 0.12);
+  border: 1px solid rgba(124, 156, 196, 0.35);
+  box-shadow: 0 4px 16px rgba(3, 7, 18, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.20);
+  color: #FFFFFF;
+  font-size: 0.825rem;
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
 }
 
+.hero-workspace-pill .pill-folder-icon {
+  color: #7C9CC4;
+  flex-shrink: 0;
+}
+
+.hero-workspace-pill strong {
+  color: #E4B863;
+  font-weight: 600;
+}
+
+.workspace-pill-path {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.725rem;
+  font-family: var(--font-mono);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hero-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  max-width: 680px;
+}
+
+.prompt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.825rem;
+  cursor: pointer;
+  transition: var(--transition-spring);
+}
+
+.prompt-chip:hover {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(228, 184, 99, 0.40);
+  color: #FFFFFF;
+  transform: translateY(-1px);
+}
+
+.chip-sparkle {
+  color: #E4B863;
+  font-size: 0.85rem;
+}
+
+.hero-input-tray {
+  padding: 0 1.5rem 1.25rem 1.5rem;
+  width: 100%;
+}
+
+.hero-input-tray .input-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem 1.15rem 0.8rem 1.15rem;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(60px) saturate(180%);
+  -webkit-backdrop-filter: blur(60px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 24px;
+  box-shadow: 0 16px 40px rgba(3, 7, 18, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(2, 6, 16, 0.35);
+  transition: var(--transition-spring);
+  overflow: visible;
+}
+/* Hero Attached Images */
+.hero-attached-images-tray {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  padding: 0.35rem 0.25rem 0.5rem 0.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hero-attached-img-item {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  background: rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.hero-attached-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.remove-img-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.30);
+  color: #FFFFFF;
+  font-size: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+
+.remove-img-btn:hover {
+  background: rgba(248, 113, 113, 0.85);
+  border-color: #F87171;
+}
+
+.attach-image-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #E4B863;
+  cursor: pointer;
+  transition: var(--transition-spring);
+  flex-shrink: 0;
+}
+
+.attach-image-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(228, 184, 99, 0.45);
+  transform: translateY(-0.5px);
+}
+
+.hero-input-tray .input-card:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 20px 48px rgba(3, 7, 18, 0.58), inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 0 rgba(2, 6, 16, 0.35);
+}
+
+.hero-input-tray .input-card:focus-within {
+  border-color: rgba(228, 184, 99, 0.40);
+  background: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 0 0 3px rgba(228, 184, 99, 0.15), 0 20px 48px rgba(3, 7, 18, 0.60), inset 0 1px 0 rgba(255, 255, 255, 0.30);
+}
+
+.hero-input-tray .input-card textarea {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  padding: 0.25rem 0.25rem;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  font-size: 0.95rem;
+  font-family: var(--font-text);
+  color: #FFFFFF;
+  resize: none;
+  min-height: 56px;
+  line-height: 1.55;
+}
+
+.hero-input-tray .input-card textarea::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.hero-input-tray .input-card textarea:focus {
+  outline: none !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.hero-input-tray .input-card-bottom {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hero-input-tray .input-card-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-left: auto;
+}
+
+.hero-input-tray .input-hints {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hero-input-tray .hint-text {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.40);
+  letter-spacing: 0.01em;
+}
+
+.hero-input-tray .hint-text kbd {
+  font-family: inherit;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.hero-input-tray .send-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1.4rem;
+  border-radius: 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.hero-input-tray .send-icon {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  transform: rotate(-10deg);
+  display: block;
+}
 /* ---------- Mobile / narrow-viewport layout ---------- */
 
 .drawer-backdrop {

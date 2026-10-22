@@ -1,5 +1,5 @@
 {
-  "name": "acp-ui",
+  "name": "omp-ui",
   "private": true,
   "version": "0.1.16",
   "type": "module",
@@ -10,6 +10,7 @@
     "build:web": "vue-tsc --noEmit && vite build --mode web",
     "preview:web": "vite preview --mode web --outDir dist-web",
     "preview": "vite preview",
+    "build:desktop": "tauri build --ignore-version-mismatches",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-store": "^2.4.2",
+    "katex": "^0.19.0",
     "marked": "^17.0.1",
     "pinia": "^3.0.4",
     "vue": "^3.5.13",
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/katex": "^0.16.8",
     "@types/node": "^25.1.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "~5.6.2",

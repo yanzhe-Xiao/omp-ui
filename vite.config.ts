@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { ompSessionsPlugin } from "./vite-sessions-plugin";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -18,7 +19,7 @@ export default defineConfig(async ({ mode }) => {
   const isWeb = mode === "web";
 
   return {
-    plugins: [vue()],
+    plugins: [vue(), ompSessionsPlugin()],
 
     define: {
       // Exposed to the frontend as `import.meta.env.VITE_APP_VERSION`. The

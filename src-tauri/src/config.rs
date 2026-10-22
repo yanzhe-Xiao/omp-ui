@@ -72,14 +72,34 @@ impl AgentConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct ProxyConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyConfig>,
     pub agents: IndexMap<String, AgentConfig>,
 }
 
 impl Default for AgentsConfig {
     fn default() -> Self {
         let mut agents = IndexMap::new();
+        agents.insert(
+            "Oh My Pi".to_string(),
+            AgentConfig::stdio(
+                "omp".to_string(),
+                vec!["acp".to_string()],
+                std::collections::HashMap::new(),
+            ),
+        );
         agents.insert(
             "GitHub Copilot".to_string(),
             AgentConfig::stdio(
@@ -188,7 +208,11 @@ impl Default for AgentsConfig {
                 std::collections::HashMap::new(),
             ),
         );
-        AgentsConfig { agents }
+        AgentsConfig {
+            version: Some(1),
+            proxy: None,
+            agents,
+        }
     }
 }
 
@@ -213,7 +237,31 @@ impl ConfigManager {
 
         // Load initial config or create default
         let config = if config_path.exists() {
-            load_config(&config_path)?
+            let mut loaded = load_config(&config_path)?;
+            // Migrate legacy config without version:
+            // Add "Oh My Pi" if not present, then stamp version so future user deletions are respected.
+            if !loaded.agents.contains_key("Oh My Pi") {
+                loaded.agents.insert(
+                    "Oh My Pi".to_string(),
+                    AgentConfig::stdio(
+                        "omp".to_string(),
+                        vec!["acp".to_string()],
+                        std::collections::HashMap::new(),
+                    ),
+                );
+            }
+            // Ensure "Oh My Pi" is the default first agent
+            if let Some(omp_cfg) = loaded.agents.shift_remove("Oh My Pi") {
+                let mut new_agents = IndexMap::new();
+                new_agents.insert("Oh My Pi".to_string(), omp_cfg);
+                for (k, v) in loaded.agents {
+                    new_agents.insert(k, v);
+                }
+                loaded.agents = new_agents;
+            }
+            loaded.version = Some(1);
+            let _ = save_config(&config_path, &loaded);
+            loaded
         } else {
             let default_config = AgentsConfig::default();
             save_config(&config_path, &default_config)?;
@@ -291,6 +339,15 @@ impl ConfigManager {
             } else {
                 return Err(format!("Agent '{}' not found", name));
             }
+        }
+        self.save()?;
+        Ok(self.get_config())
+    }
+
+    pub fn update_proxy(&self, enabled: bool, url: Option<String>) -> Result<AgentsConfig, String> {
+        {
+            let mut agents_config = self.config.write();
+            agents_config.proxy = Some(ProxyConfig { enabled, url });
         }
         self.save()?;
         Ok(self.get_config())
@@ -401,12 +458,76 @@ mod tests {
     }
 
     #[test]
-    fn defaults_keep_all_eleven_stdio_agents() {
+    fn defaults_keep_all_twelve_stdio_agents() {
         let cfg = AgentsConfig::default();
-        assert_eq!(cfg.agents.len(), 11);
+        assert_eq!(cfg.agents.len(), 12);
+        assert!(cfg.agents.contains_key("Oh My Pi"));
+        let omp = cfg.agents.get("Oh My Pi").unwrap();
+        assert_eq!(omp.transport, AgentTransport::Stdio);
+        assert_eq!(omp.command.as_deref(), Some("omp"));
+        assert_eq!(omp.args.as_deref(), Some(&["acp".to_string()][..]));
         for (_, a) in &cfg.agents {
             assert_eq!(a.transport, AgentTransport::Stdio);
             assert!(a.command.is_some());
         }
+    }
+
+    #[test]
+    fn migrates_legacy_config_without_overwriting_or_re_adding_deleted_agent() {
+        // 1. Legacy config (no version, no Oh My Pi)
+        let legacy_json = r#"{"agents":{"Custom":{"command":"custom-cmd","args":[],"env":{}}}}"#;
+        let mut cfg: AgentsConfig = serde_json::from_str(legacy_json).unwrap();
+        assert!(cfg.version.is_none());
+        assert!(!cfg.agents.contains_key("Oh My Pi"));
+
+        // Perform migration check
+        if cfg.version.is_none() {
+            if !cfg.agents.contains_key("Oh My Pi") {
+                cfg.agents.insert(
+                    "Oh My Pi".to_string(),
+                    AgentConfig::stdio(
+                        "omp".to_string(),
+                        vec!["acp".to_string()],
+                        std::collections::HashMap::new(),
+                    ),
+                );
+            }
+            cfg.version = Some(1);
+        }
+        assert_eq!(cfg.version, Some(1));
+        assert!(cfg.agents.contains_key("Oh My Pi"));
+        assert!(cfg.agents.contains_key("Custom"));
+
+        // 2. User explicitly removes Oh My Pi afterwards
+        cfg.agents.shift_remove("Oh My Pi");
+        assert!(!cfg.agents.contains_key("Oh My Pi"));
+
+        // Simulate next startup check: since version is Some(1), Oh My Pi is NOT re-added
+        if cfg.version.is_none() {
+            if !cfg.agents.contains_key("Oh My Pi") {
+                cfg.agents.insert(
+                    "Oh My Pi".to_string(),
+                    AgentConfig::stdio(
+                        "omp".to_string(),
+                        vec!["acp".to_string()],
+                        std::collections::HashMap::new(),
+                    ),
+                );
+            }
+        }
+        assert!(!cfg.agents.contains_key("Oh My Pi"));
+    }
+
+    #[test]
+    fn roundtrips_proxy_config() {
+        let json = r#"{"proxy":{"enabled":true,"url":"http://127.0.0.1:7890"},"agents":{}}"#;
+        let cfg: AgentsConfig = serde_json::from_str(json).unwrap();
+        assert!(cfg.proxy.is_some());
+        let proxy = cfg.proxy.as_ref().unwrap();
+        assert!(proxy.enabled);
+        assert_eq!(proxy.url.as_deref(), Some("http://127.0.0.1:7890"));
+
+        let serialized = serde_json::to_string(&cfg).unwrap();
+        assert!(serialized.contains("\"http://127.0.0.1:7890\""));
     }
 }

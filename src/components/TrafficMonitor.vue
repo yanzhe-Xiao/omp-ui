@@ -124,32 +124,48 @@ function handleCopy(entry: TrafficEntry) {
     ></div>
     
     <div class="monitor-header">
-      <span class="title">📡 ACP Traffic</span>
-      
+      <span class="title">
+        <svg class="traffic-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+          <path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" fill="currentColor" fill-opacity="0.3" />
+          <path d="M12 3a9 9 0 0 1 9 9" />
+          <path d="M12 7a5 5 0 0 1 5 5" />
+          <path d="M12 17v4" />
+          <path d="M9 21h6" />
+          <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+        </svg>
+        <span>通信监控</span>
+      </span>
       <div class="controls">
         <button 
           class="control-btn"
           :class="{ active: trafficStore.isPaused }"
           @click="trafficStore.togglePause()"
-          :title="trafficStore.isPaused ? 'Resume' : 'Pause'"
+          :title="trafficStore.isPaused ? '恢复监听' : '暂停监听'"
         >
-          {{ trafficStore.isPaused ? '▶' : '⏸' }}
+          {{ trafficStore.isPaused ? '▶ 恢复' : '⏸ 暂停' }}
         </button>
         
         <button 
           class="control-btn"
           @click="trafficStore.clear()"
-          title="Clear"
+          title="清空记录"
         >
-          🗑
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="13" height="13">
+            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
         </button>
         
         <div class="search-container">
-          <span class="search-icon">🔍</span>
+          <span class="search-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </span>
           <input 
             type="text"
             class="search-input"
-            placeholder="Search..."
+            placeholder="搜索通信消息..."
             :value="trafficStore.searchQuery"
             @input="trafficStore.setSearch(($event.target as HTMLInputElement).value)"
           />
@@ -157,14 +173,14 @@ function handleCopy(entry: TrafficEntry) {
             v-if="trafficStore.searchQuery"
             class="search-clear-btn"
             @click="trafficStore.clearSearch()"
-            title="Clear search"
+            title="清除搜索"
           >
             ×
           </button>
         </div>
         
         <span v-if="trafficStore.searchQuery" class="match-count">
-          {{ trafficStore.filteredEntries.length }} match{{ trafficStore.filteredEntries.length === 1 ? '' : 'es' }}
+          {{ trafficStore.filteredEntries.length }} 项匹配
         </span>
         
         <select 
@@ -172,14 +188,19 @@ function handleCopy(entry: TrafficEntry) {
           :value="trafficStore.filter"
           @change="trafficStore.setFilter(($event.target as HTMLSelectElement).value as any)"
         >
-          <option value="all">All</option>
-          <option value="requests">Requests</option>
-          <option value="responses">Responses</option>
-          <option value="notifications">Notifications</option>
+          <option value="all">全部</option>
+          <option value="requests">请求</option>
+          <option value="responses">响应</option>
+          <option value="notifications">通知</option>
         </select>
       </div>
       
-      <button class="close-btn" @click="emit('close')" title="Close">×</button>
+      <button class="close-btn" @click="emit('close')" title="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
     </div>
     
     <div 
@@ -188,7 +209,7 @@ function handleCopy(entry: TrafficEntry) {
       @scroll="handleScroll"
     >
       <div v-if="trafficStore.filteredEntries.length === 0" class="empty-state">
-        No traffic captured yet. Connect to an agent to see ACP messages.
+        暂无通信记录。连接智能体后在此查看 ACP 交互消息。
       </div>
       
       <div 
@@ -219,7 +240,7 @@ function handleCopy(entry: TrafficEntry) {
     </div>
     
     <div v-if="trafficStore.isPaused" class="paused-indicator">
-      ⏸ Paused
+      ⏸ 监控已暂停
     </div>
   </div>
 </template>
@@ -228,10 +249,13 @@ function handleCopy(entry: TrafficEntry) {
 .traffic-monitor {
   display: flex;
   flex-direction: column;
-  background: var(--bg-sidebar);
-  border-top: 1px solid var(--border-color);
+  background: rgba(11, 19, 34, 0.88);
+  backdrop-filter: blur(60px) saturate(180%);
+  -webkit-backdrop-filter: blur(60px) saturate(180%);
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
   font-size: 0.8rem;
   position: relative;
+  box-shadow: 0 -8px 32px rgba(3, 7, 18, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .resize-handle {
@@ -247,104 +271,145 @@ function handleCopy(entry: TrafficEntry) {
 
 .resize-handle:hover,
 .resize-handle:active {
-  background: var(--bg-primary);
-  opacity: 0.5;
+  background: #E4B863;
+  opacity: 0.6;
 }
 
 .monitor-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: var(--bg-main);
-  border-bottom: 1px solid var(--border-color);
+  padding: 0.6rem 1rem;
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
 
 .title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 600;
   margin-right: auto;
+  color: #FFFFFF;
+}
+
+.traffic-title-icon {
+  width: 16px;
+  height: 16px;
+  color: #E4B863;
+  flex-shrink: 0;
 }
 
 .controls {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
 }
 
 .control-btn {
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: transparent;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
   font-size: 0.75rem;
+  transition: var(--transition-spring);
 }
 
 .control-btn:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFFFFF;
 }
 
 .control-btn.active {
-  background: var(--bg-warning);
+  background: rgba(228, 184, 99, 0.18);
+  border-color: rgba(228, 184, 99, 0.45);
+  color: #F3DCA8;
 }
 
 .search-container {
   display: flex;
   align-items: center;
   position: relative;
-  background: var(--bg-main);
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 0 0.25rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 0.15rem 0.45rem;
 }
 
 .search-icon {
   font-size: 0.7rem;
   opacity: 0.6;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .search-input {
-  width: 120px;
-  padding: 0.25rem 0.4rem;
-  border: none;
-  background: transparent;
-  color: var(--text-primary);
+  width: 140px;
+  padding: 0.25rem 0.45rem;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  color: #FFFFFF;
   font-size: 0.75rem;
-  outline: none;
+  outline: none !important;
+}
+
+.search-input:focus {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.search-container:focus-within {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 0 0 3px rgba(228, 184, 99, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .search-input::placeholder {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.40);
 }
 
 .search-clear-btn {
   padding: 0 0.25rem;
   border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.40);
   cursor: pointer;
   font-size: 0.9rem;
   line-height: 1;
+  transition: var(--transition-spring);
 }
 
 .search-clear-btn:hover {
-  color: var(--text-primary);
+  color: #FFFFFF;
 }
 
 .match-count {
   font-size: 0.7rem;
-  color: var(--text-muted);
+  color: #E4B863;
   white-space: nowrap;
 }
 
 .filter-select {
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: var(--bg-main);
-  color: var(--text-primary);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #FFFFFF;
   font-size: 0.75rem;
   cursor: pointer;
+  transition: var(--transition-spring);
+}
+
+.filter-select option {
+  background: #0B1322;
+  color: #FFFFFF;
 }
 
 .close-btn {
@@ -353,48 +418,52 @@ function handleCopy(entry: TrafficEntry) {
   background: transparent;
   cursor: pointer;
   font-size: 1rem;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.50);
+  border-radius: 12px;
+  transition: var(--transition-spring);
 }
 
 .close-btn:hover {
-  color: var(--text-primary);
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.10);
 }
 
 .log-container {
   flex: 1;
   overflow-y: auto;
-  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-family: var(--font-mono);
 }
 
 .empty-state {
   padding: 2rem;
   text-align: center;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.40);
 }
 
 .entry {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .entry-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.75rem;
+  gap: 0.65rem;
+  padding: 0.45rem 1rem;
   cursor: pointer;
+  transition: var(--transition-spring);
 }
 
 .entry-header:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .expand-icon {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.45);
   width: 1em;
 }
 
 .timestamp {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.45);
   font-size: 0.7rem;
 }
 
@@ -404,57 +473,42 @@ function handleCopy(entry: TrafficEntry) {
 }
 
 .entry.out .direction-icon {
-  color: #0066cc;
+  color: #60A5FA;
 }
 
 .entry.in .direction-icon {
-  color: #28a745;
+  color: #34D399;
 }
 
 .entry.error .direction-icon,
 .entry.error .method {
-  color: #dc3545;
-}
-
-@media (prefers-color-scheme: dark) {
-  .entry.out .direction-icon {
-    color: #4da6ff;
-  }
-  
-  .entry.in .direction-icon {
-    color: #5cb85c;
-  }
-  
-  .entry.error .direction-icon,
-  .entry.error .method {
-    color: #ff6b6b;
-  }
+  color: #F87171;
 }
 
 .method {
   font-weight: 600;
-  color: var(--text-primary);
+  color: #FFFFFF;
 }
 
 .type-label {
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.45);
   font-size: 0.7rem;
 }
 
 .request-id {
-  color: var(--text-accent);
+  color: #E4B863;
   font-size: 0.7rem;
   margin-left: auto;
 }
 
 .copy-btn {
-  padding: 0.125rem 0.25rem;
+  padding: 0.15rem 0.35rem;
   border: none;
   background: transparent;
   cursor: pointer;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--transition-spring);
 }
 
 .entry-header:hover .copy-btn {
@@ -462,14 +516,15 @@ function handleCopy(entry: TrafficEntry) {
 }
 
 .entry-payload {
-  padding: 0.5rem 0.75rem 0.75rem 2rem;
-  background: var(--bg-code);
+  padding: 0.65rem 1rem 0.85rem 2.25rem;
+  background: rgba(6, 10, 19, 0.75);
   overflow-x: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .entry-payload pre {
   margin: 0;
-  color: var(--text-code);
+  color: #E2E8F0;
   font-size: 0.75rem;
   white-space: pre-wrap;
   word-break: break-all;
@@ -477,12 +532,14 @@ function handleCopy(entry: TrafficEntry) {
 
 .paused-indicator {
   position: absolute;
-  bottom: 0.5rem;
-  right: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  background: var(--bg-warning);
-  border-radius: 4px;
-  font-size: 0.7rem;
-  color: #856404;
+  bottom: 0.65rem;
+  right: 0.65rem;
+  padding: 0.3rem 0.65rem;
+  background: rgba(228, 184, 99, 0.15);
+  border: 1px solid rgba(228, 184, 99, 0.35);
+  border-radius: 12px;
+  font-size: 0.72rem;
+  color: #F3DCA8;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 </style>

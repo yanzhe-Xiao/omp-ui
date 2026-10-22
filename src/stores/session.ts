@@ -2,9 +2,20 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import { loadKvStore, type KVStore } from '../lib/host/storage';
-import { getAppVersion } from '../lib/host';
+import { getAppVersion, getSessionTranscript, getOmpModelsAndConfig, type PromptSuggestion } from '../lib/host';
 import { trackEvent, trackError } from '../lib/telemetry';
-import type { SavedSession, ChatMessage, ToolCallInfo, PermissionRequest, SessionMode, SlashCommand, ModelInfo, AgentConfig } from '../lib/types';
+import type {
+  SavedSession,
+  ChatMessage,
+  ToolCallInfo,
+  PermissionRequest,
+  SessionMode,
+  SlashCommand,
+  ModelInfo,
+  AgentConfig,
+  ConfigOption,
+  GlobalSessionSummary,
+} from '../lib/types';
 import { getTransportKind } from '../lib/types';
 import { AcpClientBridge, createAcpClient } from '../lib/acp-bridge';
 import { onAgentStderr, spawnAgent, killAgent } from '../lib/host';
@@ -36,6 +47,129 @@ function detectPhase(line: string): string | null {
   return null;
 }
 
+export function extractToolOverview(name: string, args: any, locations?: { path: string }[]): string {
+  if (locations && locations.length > 0 && locations[0].path) {
+    return locations[0].path;
+  }
+  if (!args || typeof args !== 'object') {
+    return '';
+  }
+
+  if (args.i && typeof args.i === 'string') {
+    return args.i;
+  }
+
+  if (name === 'read' || name === 'write') {
+    return args.path || '';
+  }
+
+  if (name === 'edit') {
+    if (args.input && typeof args.input === 'string') {
+      const match = /^\[([^#\]]+)/.exec(args.input.trim());
+      if (match) return match[1];
+    }
+    return args.path || '';
+  }
+
+  if (name === 'bash') {
+    return args.command || '';
+  }
+
+  if (name === 'grep') {
+    if (args.pattern) {
+      return `"${args.pattern}"` + (args.path ? ` in ${args.path}` : '');
+    }
+  }
+
+  if (name === 'glob') {
+    return args.path || '';
+  }
+
+  if (name === 'eval') {
+    return args.title || (args.code ? args.code.slice(0, 50).replace(/\n/g, ' ') : '');
+  }
+
+  if (name === 'todo') {
+    return (args.op ? `${args.op}: ` : '') + (args.task || '');
+  }
+
+  if (args.path && typeof args.path === 'string') {
+    return args.path;
+  }
+
+  return '';
+}
+
+interface SessionCapabilitiesLike {
+  modes?: {
+    availableModes?: Array<{ id: string; name: string; description?: string }>;
+    currentModeId?: string;
+  };
+  models?: {
+    availableModels?: Array<{ modelId: string; name: string; description?: string }>;
+    currentModelId?: string;
+  };
+  configOptions?: ConfigOption[];
+}
+
+function extractModelsAndModes(res: SessionCapabilitiesLike): {
+  modes: SessionMode[];
+  currentModeId: string;
+  models: ModelInfo[];
+  currentModelId: string;
+  thinkingLevels: Array<{ id: string; name: string; description?: string }>;
+  currentThinkingLevel: string;
+} {
+  const modes: SessionMode[] = (res.modes?.availableModes || []).map((m) => ({
+    id: m.id,
+    name: m.name,
+    description: m.description,
+  }));
+  const currentModeId = res.modes?.currentModeId || '';
+
+  let models: ModelInfo[] = [];
+  let currentModelId = '';
+  if (res.models) {
+    models = (res.models.availableModels || []).map((m) => ({
+      modelId: m.modelId,
+      name: m.name,
+      description: m.description,
+    }));
+    currentModelId = res.models.currentModelId || '';
+  } else if (Array.isArray(res.configOptions)) {
+    const modelConfig = res.configOptions.find(
+      (opt) => opt.category === 'model' || opt.id === 'model'
+    );
+    if (modelConfig && Array.isArray(modelConfig.options)) {
+      models = modelConfig.options.map((opt) => ({
+        modelId: opt.value,
+        name: opt.name || opt.value,
+        description: opt.description,
+      }));
+      currentModelId = modelConfig.currentValue || '';
+    }
+  }
+
+  let thinkingLevels: Array<{ id: string; name: string; description?: string }> = [];
+  let currentThinkingLevel = '';
+  if (Array.isArray(res.configOptions)) {
+    const thinkConfig = res.configOptions.find(
+      (opt) => opt.category === 'thought_level' || opt.id === 'thinking'
+    );
+    if (thinkConfig && Array.isArray(thinkConfig.options)) {
+      thinkingLevels = thinkConfig.options.map((opt) => ({
+        id: opt.value,
+        name: opt.name || opt.value,
+        description: opt.description,
+      }));
+      currentThinkingLevel = thinkConfig.currentValue || '';
+    }
+  }
+
+  return { modes, currentModeId, models, currentModelId, thinkingLevels, currentThinkingLevel };
+}
+
+
 export const useSessionStore = defineStore('session', () => {
   // State
   const savedSessions = ref<SavedSession[]>([]);
@@ -62,14 +196,66 @@ export const useSessionStore = defineStore('session', () => {
   const availableModes = ref<SessionMode[]>([]);
   const currentModeId = ref<string>('');
   
-  // Slash commands
-  const availableCommands = ref<SlashCommand[]>([]);
+  // Standard OMP slash commands & skills
+  // Built-in basic commands (extended dynamically from backend OMP skills)
+  const BUILTIN_COMMANDS: SlashCommand[] = [
+    { name: 'new', description: '开启全新会话 (重置当前对话状态)', hint: '[cwd]' },
+    { name: 'model', description: '查看或切换当前使用的大语言模型', hint: '[model-id]' },
+    { name: 'usage', description: '查看账户使用配额与 Token 消耗统计' },
+    { name: 'switch', description: '切换当前绑定的服务商或账号凭据' },
+    { name: 'login', description: '登录或配置新的服务商账号' },
+    { name: 'logout', description: '登出当前账号并清除凭据' },
+    { name: 'plan', description: '生成并审阅多步骤执行规划' },
+    { name: 'queue', description: '查看后台并发任务队列状态' },
+    { name: 'goal', description: '设定当前任务的最终验收目标', hint: '<goal-text>' },
+    { name: 'settings', description: '打开偏好设置面板' },
+    { name: 'clear', description: '清空当前屏幕内容' },
+  ];
+  const availableCommands = ref<SlashCommand[]>(BUILTIN_COMMANDS);
   
-  // Session models
+  // Session models (dynamically loaded from omp models.db and config.yml)
   const availableModels = ref<ModelInfo[]>([]);
   const currentModelId = ref<string>('');
-  
-  // Connection cancellation
+
+  // Session thinking levels (dynamically loaded from omp models.db and config.yml)
+  const availableThinkingLevels = ref<Array<{ id: string; name: string; description?: string }>>([]);
+  const currentThinkingLevel = ref<string>('');
+
+  // System default cwd and prompt suggestions loaded from backend
+  const defaultCwd = ref<string>('');
+  const promptSuggestions = ref<PromptSuggestion[]>([]);
+
+  async function refreshOmpModelsAndConfig(): Promise<void> {
+    try {
+      const ompConfig = await getOmpModelsAndConfig();
+      if (ompConfig.models.length > 0) {
+        availableModels.value = ompConfig.models;
+      }
+      if (ompConfig.default_model_id && !currentModelId.value) {
+        currentModelId.value = ompConfig.default_model_id;
+      }
+      if (ompConfig.thinking_levels.length > 0) {
+        availableThinkingLevels.value = ompConfig.thinking_levels;
+      }
+      if (ompConfig.default_thinking_level && !currentThinkingLevel.value) {
+        currentThinkingLevel.value = ompConfig.default_thinking_level;
+      }
+      if (ompConfig.default_cwd) {
+        defaultCwd.value = ompConfig.default_cwd;
+      }
+      if (ompConfig.commands && ompConfig.commands.length > 0) {
+        availableCommands.value = ompConfig.commands;
+      }
+      if (ompConfig.prompt_suggestions && ompConfig.prompt_suggestions.length > 0) {
+        promptSuggestions.value = ompConfig.prompt_suggestions;
+      }
+    } catch (e) {
+      console.warn('Failed to load omp models and config:', e);
+    }
+  }
+
+  // Immediately query omp models and configuration
+  refreshOmpModelsAndConfig();
   let connectionAborted = false;
   
   // Startup progress tracking
@@ -129,81 +315,111 @@ export const useSessionStore = defineStore('session', () => {
     pendingPermission.value = null;
     error.value = `Connection lost: ${reason ?? 'transport closed'}`;
   }
+  // Helper to extract text safely from any ACP chunk payload shape
+  function extractChunkText(content: unknown): string {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content.map(extractChunkText).join('');
+    }
+    if (content && typeof content === 'object') {
+      if ('text' in content) {
+        const textVal = content.text;
+        if (typeof textVal === 'string') return textVal;
+      }
+      if ('content' in content) {
+        const nestedVal = content.content;
+        if (typeof nestedVal === 'string') return nestedVal;
+        if (typeof nestedVal === 'object') return extractChunkText(nestedVal);
+      }
+    }
+    return '';
+  }
 
   // Session update handler
   function handleSessionUpdate(notification: SessionNotification) {
     const update = notification.update;
     
     switch (update.sessionUpdate) {
-      case 'user_message_chunk':
-        // Append to last user message or create new (for replay)
+      case 'user_message_chunk': {
+        const text = extractChunkText(update.content);
         const lastUserMsg = messages.value[messages.value.length - 1];
         if (lastUserMsg && lastUserMsg.role === 'user') {
-          if (update.content.type === 'text') {
-            lastUserMsg.content += update.content.text;
+          if (!lastUserMsg.content) {
+            lastUserMsg.content = text;
+          } else if (text && !lastUserMsg.content.includes(text)) {
+            lastUserMsg.content += text;
           }
-        } else {
+        } else if (text) {
           messages.value.push({
             id: crypto.randomUUID(),
             role: 'user',
-            content: update.content.type === 'text' ? update.content.text : '',
+            content: text,
             timestamp: Date.now(),
           });
         }
         break;
+      }
 
-      case 'agent_message_chunk':
-        // Append to last assistant message or create new
+      case 'agent_message_chunk': {
+        const text = extractChunkText(update.content);
         const lastMsg = messages.value[messages.value.length - 1];
         if (lastMsg && lastMsg.role === 'assistant') {
-          if (update.content.type === 'text') {
-            lastMsg.content += update.content.text;
-          }
-        } else {
+          lastMsg.content = (lastMsg.content || '') + text;
+        } else if (text) {
           messages.value.push({
             id: crypto.randomUUID(),
             role: 'assistant',
-            content: update.content.type === 'text' ? update.content.text : '',
+            content: text,
             timestamp: Date.now(),
             toolCalls: [],
           });
         }
         break;
+      }
 
-      case 'agent_thought_chunk':
-        // Append to last assistant message's thought field or create new
+      case 'agent_thought_chunk': {
+        const text = extractChunkText(update.content);
         const lastAssistantMsg = messages.value[messages.value.length - 1];
         if (lastAssistantMsg && lastAssistantMsg.role === 'assistant') {
-          if (update.content.type === 'text') {
-            lastAssistantMsg.thought = (lastAssistantMsg.thought || '') + update.content.text;
-          }
-        } else {
+          lastAssistantMsg.thought = (lastAssistantMsg.thought || '') + text;
+        } else if (text) {
           messages.value.push({
             id: crypto.randomUUID(),
             role: 'assistant',
             content: '',
-            thought: update.content.type === 'text' ? update.content.text : '',
+            thought: text,
             timestamp: Date.now(),
             toolCalls: [],
           });
         }
         break;
-
-      case 'tool_call':
-        // Add tool call to the current assistant message
-        const currentAssistantMsg = messages.value[messages.value.length - 1];
-        if (currentAssistantMsg && currentAssistantMsg.role === 'assistant') {
-          if (!currentAssistantMsg.toolCalls) {
-            currentAssistantMsg.toolCalls = [];
-          }
-          currentAssistantMsg.toolCalls.push({
-            toolCallId: update.toolCallId,
-            title: update.title,
-            kind: update.kind || 'other',
-            status: update.status || 'pending',
-            locations: update.locations,
-          });
+      }
+      case 'tool_call': {
+        let currentAssistantMsg = messages.value[messages.value.length - 1];
+        if (!currentAssistantMsg || currentAssistantMsg.role !== 'assistant') {
+          currentAssistantMsg = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: '',
+            timestamp: Date.now(),
+            toolCalls: [],
+          };
+          messages.value.push(currentAssistantMsg);
         }
+        if (!currentAssistantMsg.toolCalls) {
+          currentAssistantMsg.toolCalls = [];
+        }
+        const rawArgs = update.rawInput ?? (update as any).input;
+        const overview = extractToolOverview(update.title, rawArgs, update.locations);
+        currentAssistantMsg.toolCalls.push({
+          toolCallId: update.toolCallId,
+          title: update.title,
+          kind: update.kind || 'other',
+          status: update.status || 'pending',
+          locations: update.locations,
+          overview,
+          arguments: rawArgs,
+        });
         // Also keep in global map for updates
         toolCalls.value.set(update.toolCallId, {
           toolCallId: update.toolCallId,
@@ -211,8 +427,11 @@ export const useSessionStore = defineStore('session', () => {
           kind: update.kind || 'other',
           status: update.status || 'pending',
           locations: update.locations,
+          overview,
+          arguments: rawArgs,
         });
         break;
+      }
 
       case 'tool_call_update':
         const existing = toolCalls.value.get(update.toolCallId);
@@ -247,6 +466,37 @@ export const useSessionStore = defineStore('session', () => {
             description: cmd.description,
             hint: cmd.input?.hint ?? undefined,
           }));
+        }
+        break;
+      case 'config_option_update':
+        if ('configOptions' in update && Array.isArray(update.configOptions)) {
+          const opts = update.configOptions as ConfigOption[];
+          const modelOpt = opts.find((opt) => opt.category === 'model' || opt.id === 'model');
+          if (modelOpt) {
+            if (Array.isArray(modelOpt.options)) {
+              availableModels.value = modelOpt.options.map((opt) => ({
+                modelId: opt.value,
+                name: opt.name || opt.value,
+                description: opt.description,
+              }));
+            }
+            if (modelOpt.currentValue) {
+              currentModelId.value = modelOpt.currentValue;
+            }
+          }
+          const thinkOpt = opts.find((opt) => opt.category === 'thought_level' || opt.id === 'thinking');
+          if (thinkOpt) {
+            if (Array.isArray(thinkOpt.options)) {
+              availableThinkingLevels.value = thinkOpt.options.map((opt) => ({
+                id: opt.value,
+                name: opt.name || opt.value,
+                description: opt.description,
+              }));
+            }
+            if (thinkOpt.currentValue) {
+              currentThinkingLevel.value = thinkOpt.currentValue;
+            }
+          }
         }
         break;
 
@@ -407,10 +657,13 @@ export const useSessionStore = defineStore('session', () => {
             readTextFile: canAccessFs,
             writeTextFile: canAccessFs,
           },
-        },
+          prompt: {
+            image: true,
+          },
+        } as any,
         clientInfo: {
-          name: 'acp-ui',
-          title: 'ACP UI',
+          name: 'omp-ui',
+          title: 'OMP UI',
           version: appVersion,
         },
       });
@@ -501,33 +754,74 @@ export const useSessionStore = defineStore('session', () => {
       trackEvent('SessionCreated', { agentName, success: 'true' });
       
       // Set up session modes if available
-      if (sessionResponse.modes) {
-        availableModes.value = (sessionResponse.modes.availableModes || []).map(m => ({
-          id: m.id,
-          name: m.name,
-          description: m.description ?? undefined,
-        }));
-        currentModeId.value = sessionResponse.modes.currentModeId || '';
-      } else {
-        availableModes.value = [];
-        currentModeId.value = '';
+      const extracted = extractModelsAndModes(sessionResponse as unknown as SessionCapabilitiesLike);
+      if (extracted.modes.length > 0) {
+        availableModes.value = extracted.modes;
+        currentModeId.value = extracted.currentModeId;
+      }
+      if (extracted.models.length > 0) {
+        availableModels.value = extracted.models;
+      }
+      if (extracted.thinkingLevels.length > 0) {
+        availableThinkingLevels.value = extracted.thinkingLevels;
       }
 
-      // Set up session models if available
-      if (sessionResponse.models) {
-        availableModels.value = (sessionResponse.models.availableModels || []).map(m => ({
-          modelId: m.modelId,
-          name: m.name,
-          description: m.description ?? undefined,
-        }));
-        currentModelId.value = sessionResponse.models.currentModelId || '';
-      } else {
-        availableModels.value = [];
-        currentModelId.value = '';
+      // Apply pre-selected model or adopt agent's current model
+      if (currentModelId.value) {
+        try {
+          await acpClient.setSessionConfigOption({
+            sessionId: sessionResponse.sessionId,
+            configId: 'model',
+            value: currentModelId.value,
+          });
+        } catch {
+          try {
+            await acpClient.unstable_setSessionModel({
+              sessionId: sessionResponse.sessionId,
+              modelId: currentModelId.value,
+            });
+          } catch {}
+        }
+      } else if (extracted.currentModelId) {
+        currentModelId.value = extracted.currentModelId;
+      }
+
+      // Apply pre-selected thinking level or adopt agent's current level
+      if (currentThinkingLevel.value) {
+        try {
+          await acpClient.setSessionConfigOption({
+            sessionId: sessionResponse.sessionId,
+            configId: 'thinking',
+            value: currentThinkingLevel.value,
+          });
+        } catch {}
+      } else if (extracted.currentThinkingLevel) {
+        currentThinkingLevel.value = extracted.currentThinkingLevel;
       }
 
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e);
+      let rawError = e instanceof Error ? e.message : String(e);
+      if (agentName === 'Oh My Pi' || agentName.toLowerCase().includes('omp')) {
+        const logsText = startupLogs.value.join('\n');
+        const combined = `${rawError} ${logsText}`.toLowerCase();
+        if (
+          combined.includes('not recognized') ||
+          combined.includes('not found') ||
+          combined.includes('enoent') ||
+          combined.includes('不是内部或外部命令') ||
+          combined.includes('没有那个文件或目录')
+        ) {
+          rawError = '未找到 omp 命令，请先安装 Oh My Pi，并确认其已加入系统 PATH。';
+        } else if (
+          combined.includes('authentication required') ||
+          combined.includes('credentials') ||
+          combined.includes('api key') ||
+          combined.includes('unauthorized')
+        ) {
+          rawError = 'Oh My Pi 模型或认证未配置，请先在终端运行 omp 命令完成模型配置与登录。';
+        }
+      }
+      error.value = rawError;
       // Tear down whichever side of the connection is live. The bridge owns
       // the spawned process once it exists, so prefer disconnecting it.
       // Otherwise (e.g. abort right after spawn but before bridge creation)
@@ -611,10 +905,13 @@ export const useSessionStore = defineStore('session', () => {
             readTextFile: canAccessFs,
             writeTextFile: canAccessFs,
           },
-        },
+          prompt: {
+            image: true,
+          },
+        } as any,
         clientInfo: {
-          name: 'acp-ui',
-          title: 'ACP UI',
+          name: 'omp-ui',
+          title: 'OMP UI',
           version: appVersion,
         },
       });
@@ -627,8 +924,9 @@ export const useSessionStore = defineStore('session', () => {
       toolCalls.value.clear();
 
       // Try to load existing session - may fail with auth_required
+      let sessionResponse;
       try {
-        await acpClient.loadSession({
+        sessionResponse = await acpClient.loadSession({
           sessionId: savedSession.sessionId,
           cwd: savedSession.cwd,
           mcpServers: [],
@@ -657,7 +955,7 @@ export const useSessionStore = defineStore('session', () => {
           console.log('Authentication successful:', authResponse);
 
           // Retry loading session after auth
-          await acpClient.loadSession({
+          sessionResponse = await acpClient.loadSession({
             sessionId: savedSession.sessionId,
             cwd: savedSession.cwd,
             mcpServers: [],
@@ -667,6 +965,23 @@ export const useSessionStore = defineStore('session', () => {
         }
       }
 
+
+      // Populate modes and models on resume if returned
+      if (sessionResponse) {
+        const resumeExtracted = extractModelsAndModes(sessionResponse as unknown as SessionCapabilitiesLike);
+        if (resumeExtracted.modes.length > 0) {
+          availableModes.value = resumeExtracted.modes;
+          currentModeId.value = resumeExtracted.currentModeId;
+        }
+        if (resumeExtracted.models.length > 0) {
+          availableModels.value = resumeExtracted.models;
+          currentModelId.value = resumeExtracted.currentModelId;
+        }
+        if (resumeExtracted.thinkingLevels.length > 0) {
+          availableThinkingLevels.value = resumeExtracted.thinkingLevels;
+          currentThinkingLevel.value = resumeExtracted.currentThinkingLevel;
+        }
+      }
       currentSession.value = savedSession;
       isConnected.value = true;
       // Messages already populated by session/update notifications during loadSession
@@ -701,7 +1016,10 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   // Send prompt
-  async function sendPrompt(text: string): Promise<void> {
+  async function sendPrompt(
+    text: string,
+    images?: Array<{ data: string; mimeType: string }>
+  ): Promise<void> {
     if (!acpClient || !currentSession.value) {
       throw new Error('No active session');
     }
@@ -712,20 +1030,33 @@ export const useSessionStore = defineStore('session', () => {
       role: 'user',
       content: text,
       timestamp: Date.now(),
+      images: images && images.length > 0 ? images : undefined,
     });
 
     isLoading.value = true;
     try {
+      const promptBlocks: any[] = [];
+      if (text.trim()) {
+        promptBlocks.push({
+          type: 'text',
+          text: text.trim(),
+        });
+      }
+      if (images && images.length > 0) {
+        for (const img of images) {
+          const rawBase64 = img.data.replace(/^data:[^;]+;base64,/, '');
+          promptBlocks.push({
+            type: 'image',
+            data: rawBase64,
+            mimeType: img.mimeType || 'image/png',
+          });
+        }
+      }
+
       const response = await acpClient.prompt({
         sessionId: currentSession.value.sessionId,
-        prompt: [
-          {
-            type: 'text',
-            text,
-          },
-        ],
+        prompt: promptBlocks,
       });
-
       console.log('Prompt completed:', response.stopReason);
 
       // Track prompt sent
@@ -818,9 +1149,7 @@ export const useSessionStore = defineStore('session', () => {
     toolCalls.value.clear();
     availableModes.value = [];
     currentModeId.value = '';
-    availableCommands.value = [];
-    availableModels.value = [];
-    currentModelId.value = '';
+    refreshOmpModelsAndConfig();
   }
 
   // Delete saved session
@@ -844,19 +1173,43 @@ export const useSessionStore = defineStore('session', () => {
     currentModeId.value = modeId;
   }
 
-  // Set session model
+  // Set session model (works on Hero screen and during active session)
   async function setModel(modelId: string): Promise<void> {
-    if (!acpClient || !currentSession.value) {
-      throw new Error('No active session');
-    }
-    
-    await acpClient.unstable_setSessionModel({
-      sessionId: currentSession.value.sessionId,
-      modelId,
-    });
-    
-    // Optimistically update the current model
     currentModelId.value = modelId;
+    if (acpClient && currentSession.value) {
+      try {
+        await acpClient.setSessionConfigOption({
+          sessionId: currentSession.value.sessionId,
+          configId: 'model',
+          value: modelId,
+        });
+      } catch (err) {
+        try {
+          await acpClient.unstable_setSessionModel({
+            sessionId: currentSession.value.sessionId,
+            modelId,
+          });
+        } catch (fallbackErr) {
+          console.warn('Failed to set session model on agent:', fallbackErr);
+        }
+      }
+    }
+  }
+
+  // Set thinking level (works on Hero screen and during active session)
+  async function setThinkingLevel(level: string): Promise<void> {
+    currentThinkingLevel.value = level;
+    if (acpClient && currentSession.value) {
+      try {
+        await acpClient.setSessionConfigOption({
+          sessionId: currentSession.value.sessionId,
+          configId: 'thinking',
+          value: level,
+        });
+      } catch (err) {
+        console.warn('Failed to set thinking level on agent:', err);
+      }
+    }
   }
 
   function clearError() {
@@ -915,6 +1268,101 @@ export const useSessionStore = defineStore('session', () => {
       isReconnecting.value = false;
     }
   }
+  async function loadHistoricalSession(sessionSummary: GlobalSessionSummary): Promise<void> {
+    isLoading.value = true;
+    error.value = null;
+
+    try {
+      const transcript = await getSessionTranscript(
+        sessionSummary.session_id,
+        sessionSummary.cwd,
+        sessionSummary.file_path
+      );
+
+      toolCalls.value.clear();
+      for (const m of transcript.messages) {
+        for (const tc of m.tool_calls) {
+          const overview = extractToolOverview(tc.name, tc.arguments);
+          toolCalls.value.set(tc.id, {
+            toolCallId: tc.id,
+            title: tc.name,
+            kind: tc.name,
+            status: tc.result !== null ? (tc.is_error ? 'failed' : 'completed') : 'pending',
+            overview,
+            arguments: tc.arguments,
+            result: tc.result,
+          });
+        }
+      }
+
+      const chatMsgs: ChatMessage[] = transcript.messages.map((m: any) => {
+        const toolCallsList: ToolCallInfo[] = (m.tool_calls || []).map((tc: any) => ({
+          toolCallId: tc.id,
+          title: tc.name,
+          kind: tc.name,
+          status: tc.result !== null ? (tc.is_error ? 'failed' : 'completed') : 'pending',
+          overview: extractToolOverview(tc.name, tc.arguments),
+          arguments: tc.arguments,
+          result: tc.result,
+        }));
+
+        const imagesList = (m.images || []).map((img: any) => ({
+          data: img.data,
+          mimeType: img.mime_type || img.mimeType || 'image/png',
+          previewUrl: img.data.startsWith('data:') ? img.data : `data:${img.mime_type || img.mimeType || 'image/png'};base64,${img.data}`,
+        }));
+
+        return {
+          id: m.id,
+          role: m.role,
+          content: m.text || '',
+          thought: m.thinking || undefined,
+          timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
+          toolCalls: toolCallsList.length > 0 ? toolCallsList : undefined,
+          images: imagesList.length > 0 ? imagesList : undefined,
+        };
+      });
+
+      messages.value = chatMsgs;
+
+      if (transcript.model) {
+        currentModelId.value = transcript.model;
+        if (!availableModels.value.some(m => m.modelId === transcript.model)) {
+          availableModels.value.unshift({
+            modelId: transcript.model,
+            name: transcript.model.split('/').pop() || transcript.model,
+          });
+        }
+      }
+      if (!currentThinkingLevel.value) {
+        currentThinkingLevel.value = 'high';
+      }
+      currentSession.value = {
+        id: sessionSummary.session_id,
+        sessionId: sessionSummary.session_id,
+        title: sessionSummary.title,
+        cwd: sessionSummary.cwd || '',
+        agentName: 'Oh My Pi',
+        lastUpdated: sessionSummary.updated_at * 1000,
+        supportsLoadSession: true,
+      };
+
+      isConnected.value = true;
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e);
+      throw e;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  function startNewChat(): void {
+    currentSession.value = null;
+    messages.value = [];
+    toolCalls.value.clear();
+    error.value = null;
+    isConnected.value = false;
+  }
 
   return {
     // State
@@ -934,6 +1382,10 @@ export const useSessionStore = defineStore('session', () => {
     availableCommands,
     availableModels,
     currentModelId,
+    availableThinkingLevels,
+    currentThinkingLevel,
+    defaultCwd,
+    promptSuggestions,
     startupPhase,
     startupLogs,
     startupElapsed,
@@ -949,6 +1401,8 @@ export const useSessionStore = defineStore('session', () => {
     createSession,
     resumeSession,
     sendPrompt,
+    loadHistoricalSession,
+    startNewChat,
     cancelOperation,
     cancelConnection,
     resolvePermission,
@@ -959,6 +1413,7 @@ export const useSessionStore = defineStore('session', () => {
     deleteSession,
     setMode,
     setModel,
+    setThinkingLevel,
     clearError,
     tryReconnect,
     

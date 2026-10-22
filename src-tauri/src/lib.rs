@@ -1,6 +1,8 @@
 mod agent;
 mod config;
+mod session_manager;
 
+use session_manager::{GlobalSessionSummary, SessionTranscript};
 use agent::{AgentInstance, AgentManager};
 use config::{AgentConfig, AgentTransport, AgentsConfig, ConfigManager};
 use parking_lot::RwLock;
@@ -58,7 +60,7 @@ fn spawn_agent(
 
     state
         .agent_manager
-        .spawn_agent(name, agent_config, app_handle)
+        .spawn_agent(name, agent_config, config.proxy.as_ref(), app_handle)
 }
 
 #[tauri::command]
@@ -123,6 +125,19 @@ fn update_agent(
         .as_ref()
         .ok_or_else(|| "Config manager not initialized".to_string())?
         .update_agent(name, agent_config)
+}
+
+#[tauri::command]
+fn update_proxy(
+    enabled: bool,
+    url: Option<String>,
+    state: State<AppState>,
+) -> Result<AgentsConfig, String> {
+    let config_manager = state.config_manager.read();
+    config_manager
+        .as_ref()
+        .ok_or_else(|| "Config manager not initialized".to_string())?
+        .update_proxy(enabled, url)
 }
 
 /// Build an `AgentConfig` from the loosely-typed Tauri command arguments,
@@ -214,6 +229,39 @@ fn get_machine_id() -> Result<String, String> {
     }
 }
 
+#[tauri::command]
+fn get_global_sessions() -> Result<Vec<GlobalSessionSummary>, String> {
+    session_manager::query_global_sessions()
+}
+
+#[tauri::command]
+fn get_session_transcript(
+    session_id: String,
+    cwd: Option<String>,
+    file_path: Option<String>,
+) -> Result<SessionTranscript, String> {
+    session_manager::parse_session_transcript(&session_id, cwd.as_deref(), file_path.as_deref())
+}
+
+#[tauri::command]
+fn delete_session_file(
+    session_id: String,
+    cwd: Option<String>,
+    file_path: Option<String>,
+) -> Result<(), String> {
+    session_manager::delete_session_file(&session_id, cwd.as_deref(), file_path.as_deref())
+}
+
+#[tauri::command]
+fn delete_workspace_folder(cwd: String) -> Result<(), String> {
+    session_manager::delete_workspace_folder(&cwd)
+}
+
+#[tauri::command]
+fn get_omp_models_and_config() -> Result<session_manager::OmpModelConfigResponse, String> {
+    session_manager::query_omp_models_and_config()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state = AppState {
@@ -254,7 +302,13 @@ pub fn run() {
             add_agent,
             remove_agent,
             update_agent,
-            get_machine_id
+            get_machine_id,
+            update_proxy,
+            get_global_sessions,
+            get_session_transcript,
+            delete_session_file,
+            delete_workspace_folder,
+            get_omp_models_and_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

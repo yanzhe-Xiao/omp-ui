@@ -61,7 +61,9 @@ function handleSelect(methodId: string) {
 .auth-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(3, 7, 18, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -69,71 +71,103 @@ function handleSelect(methodId: string) {
 }
 
 .auth-dialog {
-  background: var(--bg-main);
-  border-radius: 8px;
+  position: relative;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(60px) saturate(180%);
+  -webkit-backdrop-filter: blur(60px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  border-radius: 24px;
   width: 90%;
-  max-width: 420px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  max-width: 440px;
+  box-shadow: 0 24px 64px rgba(3, 7, 18, 0.70), inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -1px 0 rgba(2, 6, 16, 0.35);
+  overflow: hidden;
+}
+
+.auth-dialog::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.12), transparent 48px);
+  pointer-events: none;
 }
 
 .dialog-header {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border-color);
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .dialog-header h3 {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #FFFFFF;
 }
 
 .close-btn {
   border: none;
   background: transparent;
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   cursor: pointer;
-  color: var(--text-secondary);
-  padding: 0.25rem;
+  color: rgba(255, 255, 255, 0.50);
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  transition: var(--transition-spring);
 }
 
 .close-btn:hover {
-  color: var(--text-primary);
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .dialog-content {
-  padding: 1.25rem;
+  position: relative;
+  z-index: 1;
+  padding: 1.25rem 1.5rem;
 }
 
 .description {
-  margin: 0 0 1rem 0;
-  color: var(--text-secondary);
-  font-size: 0.9rem;
+  margin: 0 0 1.25rem 0;
+  color: rgba(255, 255, 255, 0.70);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.description strong {
+  color: #F3DCA8;
 }
 
 .auth-methods {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
 
 .auth-method-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.875rem 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-sidebar);
+  padding: 0.95rem 1.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: var(--transition-spring);
+  box-shadow: 0 4px 16px rgba(3, 7, 18, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .auth-method-btn:hover {
-  border-color: var(--bg-primary);
-  background: var(--bg-hover);
+  border-color: rgba(228, 184, 99, 0.45);
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(3, 7, 18, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .method-info {
@@ -144,41 +178,48 @@ function handleSelect(methodId: string) {
 
 .method-name {
   font-weight: 500;
-  color: var(--text-primary);
+  color: #FFFFFF;
+  font-size: 0.9rem;
 }
 
 .method-desc {
-  font-size: 0.8rem;
-  color: var(--text-muted);
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.50);
 }
 
 .arrow {
   font-size: 1.25rem;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.40);
+  transition: var(--transition-spring);
 }
 
 .auth-method-btn:hover .arrow {
-  color: var(--bg-primary);
+  color: #E4B863;
+  transform: translateX(3px);
 }
 
 .dialog-footer {
-  padding: 0.75rem 1.25rem;
-  border-top: 1px solid var(--border-color);
+  position: relative;
+  z-index: 1;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   justify-content: flex-end;
 }
 
 .cancel-btn {
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
+  padding: 0.55rem 1.15rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.80);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  transition: var(--transition-spring);
 }
 
 .cancel-btn:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
 }
 </style>
